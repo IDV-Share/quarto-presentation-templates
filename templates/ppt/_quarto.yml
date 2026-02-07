@@ -3,8 +3,11 @@ project:
 
 title: "Example — IDV Presentation Template"
 
-# extensions:
-#   - IDV-Share/quarto-presentation-templates
+requires:
+  - IDV-Share/quarto-presentation-templates
+
+extensions:
+  - IDV-Share/quarto-presentation-templates
 
 format:
   pptx:
