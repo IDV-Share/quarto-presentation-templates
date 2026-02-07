@@ -10,7 +10,13 @@ to enforce consistent branding.
 - Logo placement
 - Compatible with Quarto PPTX output
 
-## Notes
 
-- Font Awesome icons are **not supported** in PowerPoint output
-- Use images or template-defined icons instead
+## For Developers
+
+To create a PowerPoint template, start with a reference PPTX file that defines your desired styles and layouts. Then, use the following command to generate the template from your reference document:
+
+```bash
+quarto pandoc -o IDV-template.pptx --print-default-data-file reference.pptx
+```
+
+Change the style of the generated `IDV-template.pptx` as needed, and place it in the extension's `resources` folder. Update the `_extension.yml` to point to your template file.

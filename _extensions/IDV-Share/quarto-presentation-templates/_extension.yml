@@ -1,33 +1,23 @@
+#  __________________    __
+#  ____  _/__  __ \_ |  / /
+#   __  / __  / / /_ | / /
+#  __/ /  _  /_/ /__ |/ /
+#  /___/  /_____/ _____/
+#
+#  Quarto Presentation Templates for PowerPoint Presentations
+#  author: matteo larcher (matteo.larcher@idvgroup.com)
+
 title: "IDV PowerPoint Template"
 author: Matteo Larcher
 version: 1.0.0
 
 quarto-required: ">=1.8.0"
 
-# requires:
-#   - quarto-ext/fontawesome
-
 contributes:
-  resources:
-    - logos/
-
   formats:
-
     pptx:
-      reference-doc: IDV-template.pptx
+      reference-doc: reference/IDV-template.pptx
       slide-level: 2
-
-    #pdf:
-
-    # html:
-    #   template: template.html
-    #   theme: template.css
-
-    revealjs:
-      css: theme.scss
-      config:
-        slideNumber: true
-        controls: true
-        progress: true
-        history: true
-        center: true
+      filters:
+        - reduce-font.lua
+        - emphasis-colors.lua

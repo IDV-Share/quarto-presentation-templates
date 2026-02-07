@@ -1,8 +1,0 @@
----
-title: "PowerPoint Example"
-format: quarto-presentation-templates-pptx
----
-
-## Slide
-
-This uses the IDV PPT template.

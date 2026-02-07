@@ -1,0 +1,214 @@
+---
+title: "PowerPoint Example"
+author: "John Doe"
+date: today
+location: "Your Location" # Not used in PowerPoint output
+format:
+    quarto-presentation-templates-pptx:
+        footer: "Your Company Name"
+        number-sections: true
+        slide-number: c/t
+        df-print: kable
+---
+
+<!-- Title Slide is inserted automatically -->
+
+## Slide
+
+- This uses the IDV PPT template.
+- Pandoc will automatically apply the correct slide layout based on the content of each slide.
+- **Bold text** and *italic text*.
+- A list of supported pptx options can be found in the [Quarto documentation](https://quarto.org/docs/reference/formats/presentations/pptx.html).
+
+---
+
+## Text size filter
+
+This is normal text.
+
+[This is smaller text]{.small}
+
+[This is very small text]{.very-small}
+
+---
+
+## Slide with text and image
+
+This slide contains both text and an image.
+
+![Example Image](resources/media/viking-hero.jpg)
+
+
+<!-- SECTION  HEADER SLIDE-->
+
+# Section Header Slide
+
+---
+
+- No title, just content.
+
+---
+
+## incremental list
+::: {.incremental}
+
+- Eat spaghetti
+- Drink wine
+
+:::
+
+---
+
+## non incremental list
+::: {.nonincremental}
+
+- Eat spaghetti
+- Drink wine
+
+:::
+
+---
+
+## Two-column layout
+
+:::: {.columns}
+
+::: {.column}
+contents...
+:::
+
+::: {.column}
+contents...
+:::
+
+::::
+
+---
+
+# Slide Title {background-image="resources/media/tank_tracks_on_the_ground_sky_reflecting.jpg"}
+
+---
+
+## Slide with speaker notes
+
+Slide content
+
+::: {.notes}
+Speaker notes go here.
+:::
+
+---
+
+## Tables
+
+| Tables        | Are           | Cool  |
+| ------------- |:-------------:| -----:|
+| col 3 is      | right-aligned | $1600 |
+| col 2 is      | centered      |   $12 |
+| zebra stripes | are neat      |    $1 |
+
+
+## Mermaid diagrams
+
+Mermaid flow chart example:
+
+```{mermaid}
+%%| fig-width: 40%
+flowchart LR
+  A[Hard edge] --> B(Round edge)
+  B --> C{Decision}
+```
+
+---
+
+## code c++
+
+```{.cpp}
+#include <iostream>
+
+int main() {
+  std::cout << "Hello, World!" << std::endl;
+  return 0;
+}
+```
+
+## code matlab
+
+```{.matlab}
+x = linspace(0, 10, 100);
+y = sin(x);
+```
+
+---
+
+## code python
+
+```{.python}
+import matplotlib.pyplot as plt
+import numpy as np
+x = np.linspace(0, 10, 100)
+y = np.sin(x)
+plt.plot(x, y)
+plt.show()
+```
+
+---
+
+## Slide with executed python code
+
+```{python}
+#| tags: [parameters]
+
+alpha = 0.1
+ratio = 0.1
+```
+
+:::: {.columns}
+
+::: {.column}
+
+```{.python}
+import matplotlib.pyplot as plt
+import numpy as np
+x = np.linspace(0, 10, 100)
+y = np.sin(x) * alpha + np.cos(x) * ratio
+plt.plot(x, y)
+plt.show()
+```
+:::
+
+::: {.column style="vertical-align: top;"}
+
+```{python}
+#| label: fig-example
+#| fig-cap: "An example plot generated from Python code using parameters."
+#| width: 200px
+import matplotlib.pyplot as plt
+import numpy as np
+x = np.linspace(0, 10, 100)
+y = np.sin(x) * alpha + np.cos(x) * ratio
+plt.plot(x, y)
+plt.show()
+```
+:::
+
+::::
+
+---
+
+## images
+
+<!-- 4 images in 2 columns -->
+:::: {.columns}
+::: {.column}
+![Superav](resources/media/superav_home.jpg){width=20%}
+
+![viking](resources/media/viking-hero.jpg){width=20%}
+:::
+::: {.column}
+![lmv](resources/media/mtv_desert-e1744197429858.jpg){width=20%}
+
+![Modular](resources/media/idv_modular_hero-e1744210155227.jpg){width=20%}
+:::
+::::
+
