@@ -1,0 +1,14 @@
+project:
+  type: default
+
+title: "Example — IDV Presentation Template"
+
+# extensions:
+#   - IDV-Share/quarto-presentation-templates
+
+format:
+  pptx:
+    slide-level: 2
+
+execute:
+  freeze: auto

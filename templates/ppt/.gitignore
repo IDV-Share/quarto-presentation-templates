@@ -1,0 +1,7 @@
+.quarto/
+**/*.quarto_ipynb
+
+/template.pdf
+/template.pptx
+/template.html
+/template_files/
