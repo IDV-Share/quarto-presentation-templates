@@ -3,12 +3,14 @@ title: "PowerPoint Example"
 author: "John Doe"
 date: today
 location: "Your Location" # Not used in PowerPoint output
+bibliography: references.bib
 format:
     quarto-presentation-templates-pptx:
-        footer: "Your Company Name"
+        footer: "IDV Defence Vehicles Italy" # not supported in PowerPoint output
         number-sections: true
-        slide-number: c/t
-        df-print: kable
+        slide-number: c/t # not supported in PowerPoint output
+        toc: true
+        toc-depth: 1
 ---
 
 <!-- Title Slide is inserted automatically -->
@@ -17,6 +19,10 @@ format:
 
 - This uses the IDV PPT template.
 - Pandoc will automatically apply the correct slide layout based on the content of each slide.
+
+<!--- FIXME: pause is not yet supported in PowerPoint output -->
+<!-- . . . -->
+
 - **Bold text** and *italic text*.
 - A list of supported pptx options can be found in the [Quarto documentation](https://quarto.org/docs/reference/formats/presentations/pptx.html).
 
@@ -50,22 +56,28 @@ This slide contains both text and an image.
 ---
 
 ## incremental list
-::: {.incremental}
 
+<!--- FIXME: incremental list is not working --->
+<!-- ::: {.incremental}
 - Eat spaghetti
 - Drink wine
+::: -->
 
-:::
+1. Eat spaghetti
+2. Drink wine
 
 ---
 
 ## non incremental list
-::: {.nonincremental}
+
+<!--- FIXME: non incremental list is not working --->
+<!-- ::: {.nonincremental}
+- Eat spaghetti
+- Drink wine
+::: -->
 
 - Eat spaghetti
 - Drink wine
-
-:::
 
 ---
 
@@ -73,12 +85,14 @@ This slide contains both text and an image.
 
 :::: {.columns}
 
-::: {.column}
-contents...
+<!--- FIXME: column width is not working in PowerPoint output --->
+::: {.column  style="width: 40%;"}
+Column 1.
 :::
 
-::: {.column}
-contents...
+<!--- FIXME: column width is not working in PowerPoint output --->
+::: {.column style="width: 60%;"}
+Column 2.
 :::
 
 ::::
@@ -107,11 +121,22 @@ Speaker notes go here.
 | col 2 is      | centered      |   $12 |
 | zebra stripes | are neat      |    $1 |
 
+---
+
+## Mathematical expressions
+Inline math: $E=mc^2$.
+
+Display math:
+$$
+\int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2}
+$$
+
+---
 
 ## Mermaid diagrams
 
+<!-- FIXME: wron slide format selected by pandoc -->
 Mermaid flow chart example:
-
 ```{mermaid}
 %%| fig-width: 40%
 flowchart LR
@@ -177,6 +202,7 @@ plt.show()
 ```
 :::
 
+<!--- FIXME: vertical align is not supported in PowerPoint output --->
 ::: {.column style="vertical-align: top;"}
 
 ```{python}
@@ -196,19 +222,44 @@ plt.show()
 
 ---
 
-## images
+## images python
 
-<!-- 4 images in 2 columns -->
-:::: {.columns}
-::: {.column}
-![Superav](resources/media/superav_home.jpg){width=20%}
+```{python}
+#| label: fig-images
+#| fig-cap: "Example images loaded and displayed using Python code."
+#| fig-width: 40%
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 
-![viking](resources/media/viking-hero.jpg){width=20%}
+# Load images
+images = [
+  mpimg.imread('resources/media/superav_home.jpg'),
+  mpimg.imread('resources/media/viking-hero.jpg'),
+  mpimg.imread('resources/media/mtv_desert-e1744197429858.jpg'),
+  mpimg.imread('resources/media/idv_modular_hero-e1744210155227.jpg')
+]
+
+captions = ['SUPERAV Home', 'Viking Hero', 'MTV Desert', 'IDV Modular Hero']
+
+# Create a 2x2 subplot
+fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+
+# Plot images with captions
+for ax, img, caption in zip(axs.flatten(), images, captions):
+  ax.imshow(img)
+  ax.set_title(caption, loc='center', pad=20, y=-0.2)
+  ax.axis('off')  # Hide axes
+
+plt.tight_layout()
+plt.show()
+```
+
+# Citations
+This is a citation [@idv].
+
+This is also a citation @idv.
+
+## References
+
+::: {#refs}
 :::
-::: {.column}
-![lmv](resources/media/mtv_desert-e1744197429858.jpg){width=20%}
-
-![Modular](resources/media/idv_modular_hero-e1744210155227.jpg){width=20%}
-:::
-::::
-

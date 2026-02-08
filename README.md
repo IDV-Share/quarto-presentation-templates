@@ -8,6 +8,17 @@ Reusable Quarto extensions for presentations:
 
 ## Installation
 
+### Environment Setup
+
+To setup the python environment with conda and install the required dependencies, run:
+
+```bash
+conda env create -f environment.yml
+conda activate quarto
+```
+
+### Quarto Extensions
+
 You can install the extensions using the Quarto CLI:
 
 ```bash
