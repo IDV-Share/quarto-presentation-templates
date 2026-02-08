@@ -7,5 +7,4 @@
 /template.html
 /template_files/
 /.quarto/
-
-*/_freeze/
+/_freeze/
