@@ -3,6 +3,9 @@
 
 /template.pdf
 /template.pptx
+/~$template.pptx
 /template.html
 /template_files/
 /.quarto/
+
+*/_freeze/
