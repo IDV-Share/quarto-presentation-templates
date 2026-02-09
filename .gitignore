@@ -1,6 +1,5 @@
 */.quarto/
 **/*.quarto_ipynb
-
 /template.pdf
 /template.pptx
 /~$template.pptx
@@ -8,3 +7,5 @@
 /template_files/
 /.quarto/
 /_freeze/
+
+.vscode/

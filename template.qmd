@@ -30,11 +30,25 @@ format:
 
 ## Text size filter
 
-This is normal text.
+[This is LARGE text]{.LARGE}
 
-[This is smaller text]{.small}
+[This is Large text]{.Large}
 
-[This is very small text]{.very-small}
+[This is large text]{.large}
+
+[This is NORMAL text]{.normal}
+
+[This is small text]{.small}
+
+[This is Small text]{.Small}
+
+[This is SMALL text]{.SMALL}
+
+[This is tiny text]{.tiny}
+
+[This is Tiny text]{.Tiny}
+
+[This is TINY text]{.TINY}
 
 ---
 
@@ -136,7 +150,6 @@ $$
 ## Mermaid diagrams
 
 <!-- FIXME: wron slide format selected by pandoc -->
-Mermaid flow chart example:
 ```{mermaid}
 %%| fig-width: 40%
 flowchart LR
