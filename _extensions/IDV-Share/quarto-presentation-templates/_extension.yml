@@ -21,3 +21,4 @@ contributes:
       filters:
         - custom-font-size.lua
         - emphasis-colors.lua
+        - custom-color.lua

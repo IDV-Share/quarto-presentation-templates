@@ -52,6 +52,16 @@ format:
 
 ---
 
+## Custom color filter
+
+This is [red text]{style="color:#FF0000;"}.
+
+This is [green text]{style="color:#00FF00;"}.
+
+This is [blue text]{style="color:#0000FF;"}.
+
+Syntax: `[text]{style="color:#RRGGBB;"}`
+
 ## Slide with text and image
 
 This slide contains both text and an image.
