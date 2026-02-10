@@ -4,6 +4,7 @@ local captions = {}
 local column_counter = 0
 local box_counter = 0
 local caption_counter = 0
+local DEFAULT_COLUMNS_LAYOUT = "Two Content"
 
 local function truthy(value)
   if value == nil then
@@ -74,6 +75,13 @@ local function get_meta_value(doc, key)
   end
 
   return ""
+end
+
+local function get_slide_level()
+  if PANDOC_WRITER_OPTIONS and PANDOC_WRITER_OPTIONS.slide_level ~= nil then
+    return tonumber(PANDOC_WRITER_OPTIONS.slide_level) or 2
+  end
+  return 2
 end
 
 local function get_attr_value(attrs, names)
@@ -296,6 +304,34 @@ function Pandoc(doc)
   end
   local caption_dx = get_meta_value(doc, "fig-caption-dx")
   local caption_dy = get_meta_value(doc, "fig-caption-dy")
+
+  local columns_layout = get_meta_value(doc, "columns-layout")
+  if columns_layout == "" then
+    columns_layout = DEFAULT_COLUMNS_LAYOUT
+  end
+
+  -- Force "Two Content" layout when columns are used, unless user specified one.
+  local slide_level = get_slide_level()
+  local current_header = nil
+  local has_columns = false
+  for _, block in ipairs(doc.blocks) do
+    if block.t == "Header" and block.level == slide_level then
+      if current_header ~= nil and has_columns then
+        if current_header.attributes["layout"] == nil and current_header.attributes["data-layout"] == nil then
+          current_header.attributes["data-layout"] = columns_layout
+        end
+      end
+      current_header = block
+      has_columns = false
+    elseif block.t == "Div" and has_class(block, "columns") then
+      has_columns = true
+    end
+  end
+  if current_header ~= nil and has_columns then
+    if current_header.attributes["layout"] == nil and current_header.attributes["data-layout"] == nil then
+      current_header.attributes["data-layout"] = columns_layout
+    end
+  end
 
   if #columns == 0 and #boxes == 0 and #captions == 0 and footer == "" and location == "" and caption_size == "" and caption_dx == "" and caption_dy == "" then
     return doc

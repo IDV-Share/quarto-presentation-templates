@@ -12,11 +12,11 @@ PLACEHOLDER_PREFIX = "VIDEO::"
 PICTURE_TYPES = {11, 13, 14}
 GROUP_TYPE = 6
 FILL_PICTURE = 6
+VISUAL_TYPES = {3, 7, 10, 11, 13, 14, 16}
 COLUMN_PREFIX = "COLUMN::"
 BOX_PREFIX = "BOX::"
 BOX_END_PREFIX = "BOXEND::"
 TEXTBOX_ORIENTATION = 1
-CAPTION_PREFIX = "CAPTION::"
 
 
 def truthy(value):
@@ -90,7 +90,7 @@ def collect_mapping(entries, base_dir):
 def collect_layout(entries):
     columns = {}
     boxes = {}
-    captions = {}
+    captions = []
     for entry in entries.get("columns", []):
         if isinstance(entry, dict) and entry.get("id"):
             columns[entry["id"]] = entry
@@ -98,8 +98,8 @@ def collect_layout(entries):
         if isinstance(entry, dict) and entry.get("id"):
             boxes[entry["id"]] = entry
     for entry in entries.get("captions", []):
-        if isinstance(entry, dict) and entry.get("id"):
-            captions[entry["id"]] = entry
+        if isinstance(entry, dict):
+            captions.append(entry)
     return columns, boxes, captions
 
 
@@ -137,6 +137,33 @@ def is_picture_fill(shape):
         return shape.Fill.Type == FILL_PICTURE
     except Exception:
         return False
+
+
+def is_visual_shape(shape):
+    try:
+        shape_type = shape.Type
+    except Exception:
+        return False
+
+    if shape_type in VISUAL_TYPES:
+        return True
+
+    if is_picture_fill(shape):
+        return True
+
+    if shape_type == GROUP_TYPE:
+        try:
+            count = shape.GroupItems.Count
+        except Exception:
+            return False
+        for index in range(1, count + 1):
+            try:
+                item = shape.GroupItems(index)
+            except Exception:
+                continue
+            if is_visual_shape(item):
+                return True
+    return False
 
 
 def shape_bounds(shape):
@@ -459,6 +486,16 @@ def extract_box_segment(text, box_id):
     return pre, mid, post
 
 
+def strip_caption_markers(text):
+    if not text or "CAPTION::" not in text:
+        return text
+    cleaned = re.sub(r"\bCAPTION::[^\s]+\b", "", text)
+    cleaned = re.sub(r"^[\s\r\n]+", "", cleaned)
+    cleaned = re.sub(r"[ \t]+\r", "\r", cleaned)
+    cleaned = re.sub(r"\r{2,}", "\r", cleaned)
+    return cleaned.strip(" \r\n\t")
+
+
 def remove_marker_text(shape, prefix, marker_id):
     if not marker_id:
         return
@@ -483,6 +520,104 @@ def remove_marker_text(shape, prefix, marker_id):
         text_range.Text = new_text
     except Exception:
         pass
+
+
+def collect_text_shapes(slide):
+    items = []
+    for shape in iter_shapes(slide):
+        try:
+            if shape.HasTextFrame and shape.TextFrame.HasText:
+                items.append(shape)
+        except Exception:
+            continue
+    return items
+
+
+def collect_visual_shapes(slide):
+    items = []
+    for shape in iter_shapes(slide):
+        if is_visual_shape(shape):
+            items.append(shape)
+    return items
+
+
+def shape_identity(shape):
+    try:
+        return shape.Id
+    except Exception:
+        try:
+            return shape.Name
+        except Exception:
+            return id(shape)
+
+
+def find_caption_for_image(image_shape, text_shapes, used_ids):
+    img_bounds = shape_bounds(image_shape)
+    _, img_top, img_width, img_height = img_bounds
+    img_bottom = img_top + img_height
+
+    best = None
+    best_gap = None
+
+    for shape in text_shapes:
+        if shape_identity(shape) in used_ids:
+            continue
+        bounds = shape_bounds(shape)
+        _, top, width, height = bounds
+        if width <= 0 or height <= 0:
+            continue
+        if top < img_top:
+            continue
+
+        overlap = horizontal_overlap_ratio(bounds, img_bounds)
+        if overlap < 0.25:
+            continue
+
+        if height > img_height * 0.6:
+            continue
+        if width > img_width * 1.2:
+            continue
+
+        gap = top - img_bottom
+        if gap < -5:
+            continue
+
+        if best is None or gap < best_gap:
+            best = shape
+            best_gap = gap
+
+    if best is not None:
+        return best
+
+    # Fallback: caption slightly above the visual.
+    best = None
+    best_gap = None
+    for shape in text_shapes:
+        if shape_identity(shape) in used_ids:
+            continue
+        bounds = shape_bounds(shape)
+        _, top, width, height = bounds
+        if width <= 0 or height <= 0:
+            continue
+
+        overlap = horizontal_overlap_ratio(bounds, img_bounds)
+        if overlap < 0.25:
+            continue
+
+        if height > img_height * 0.6:
+            continue
+        if width > img_width * 1.2:
+            continue
+
+        gap = img_top - (top + height)
+        if gap < -5:
+            continue
+
+        if best is None or gap < best_gap:
+            best = shape
+            best_gap = gap
+
+    return best
 
 
 def merge_caption_settings(defaults, overrides):
@@ -591,6 +726,18 @@ def apply_footer_location(presentation, footer_text, location_text, debug=None):
     return updated
 
 
+def safe_delete(shape, debug=None):
+    if shape is None:
+        return False
+    try:
+        shape.Delete()
+        return True
+    except Exception as exc:
+        if debug is not None:
+            debug(f"delete failed: {exc}")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="Embed videos into a PPTX using placeholders.")
     parser.add_argument("--input", required=True, help="Path to the PPTX to post-process.")
@@ -633,7 +780,7 @@ def main():
     else:
         debug(f"layout file not found: {layout_path}")
 
-    columns_by_id, boxes_by_id, captions_by_id = collect_layout(layout)
+    columns_by_id, boxes_by_id, caption_entries = collect_layout(layout)
     footer_text = layout.get("footer", "")
     location_text = layout.get("location", "")
     caption_defaults = layout.get("caption_defaults", {})
@@ -657,6 +804,7 @@ def main():
     adjusted_boxes = 0
     adjusted_captions = 0
     missing = []
+    caption_index = 0
 
     try:
         try:
@@ -672,7 +820,6 @@ def main():
             debug(f"slide {slide.SlideIndex}: shapes={slide.Shapes.Count}")
             column_items = []
             box_items = []
-            caption_items = []
 
             for shape in iter_shapes(slide):
                 alt_text = shape_alt_text(shape)
@@ -746,9 +893,9 @@ def main():
                     except Exception:
                         pass
 
-                    target_shape.Delete()
-                    if extra_delete is not None:
-                        extra_delete.Delete()
+                    safe_delete(target_shape, debug=debug)
+                    if extra_delete is not None and extra_delete is not target_shape:
+                        safe_delete(extra_delete, debug=debug)
                     replaced += 1
                     continue
 
@@ -778,18 +925,6 @@ def main():
                                     "bounds": shape_bounds(shape),
                                 }
                             )
-                        continue
-
-                    caption_id = extract_marker(text_value, CAPTION_PREFIX)
-                    if caption_id:
-                        entry = captions_by_id.get(caption_id, {})
-                        caption_items.append(
-                            {
-                                "id": caption_id,
-                                "shape": shape,
-                                "entry": entry,
-                            }
-                        )
                         continue
 
             if column_items:
@@ -883,32 +1018,64 @@ def main():
 
                 adjusted_boxes += 1
 
-            for item in caption_items:
-                shape = item["shape"]
-                settings = merge_caption_settings(caption_defaults, item["entry"])
+            if caption_entries:
+                text_shapes = collect_text_shapes(slide)
+                visual_shapes = collect_visual_shapes(slide)
+                used_text_ids = set()
 
-                font_size = parse_font_size(settings.get("size", ""))
-                if font_size is not None:
+                visual_shapes = sorted(
+                    visual_shapes, key=lambda s: (shape_bounds(s)[1], shape_bounds(s)[0])
+                )
+                for visual in visual_shapes:
+                    caption_shape = find_caption_for_image(visual, text_shapes, used_text_ids)
+                    if caption_shape is None:
+                        continue
+
+                    if caption_index < len(caption_entries):
+                        entry = caption_entries[caption_index]
+                        caption_index += 1
+                    else:
+                        entry = {}
+
+                    settings = merge_caption_settings(caption_defaults, entry)
+
+                    font_size = parse_font_size(settings.get("size", ""))
+                    if font_size is not None:
+                        try:
+                            caption_shape.TextFrame.TextRange.Font.Size = font_size
+                        except Exception:
+                            pass
+
+                    dx = parse_size(settings.get("dx", ""), presentation.PageSetup.SlideWidth)
+                    dy = parse_size(settings.get("dy", ""), presentation.PageSetup.SlideHeight)
+                    if dx is not None:
+                        try:
+                            caption_shape.Left = caption_shape.Left + dx
+                        except Exception:
+                            pass
+                    if dy is not None:
+                        try:
+                            caption_shape.Top = caption_shape.Top + dy
+                        except Exception:
+                            pass
+
+                    used_text_ids.add(shape_identity(caption_shape))
+                    adjusted_captions += 1
+
+            # Clean up any leftover caption markers from older runs.
+            for shape in collect_text_shapes(slide):
+                try:
+                    current = shape.TextFrame.TextRange.Text or ""
+                except Exception:
+                    continue
+                if "CAPTION::" not in current:
+                    continue
+                cleaned = strip_caption_markers(current)
+                if cleaned != current:
                     try:
-                        shape.TextFrame.TextRange.Font.Size = font_size
+                        shape.TextFrame.TextRange.Text = cleaned
                     except Exception:
                         pass
-
-                dx = parse_size(settings.get("dx", ""), presentation.PageSetup.SlideWidth)
-                dy = parse_size(settings.get("dy", ""), presentation.PageSetup.SlideHeight)
-                if dx is not None:
-                    try:
-                        shape.Left = shape.Left + dx
-                    except Exception:
-                        pass
-                if dy is not None:
-                    try:
-                        shape.Top = shape.Top + dy
-                    except Exception:
-                        pass
-
-                remove_marker_text(shape, CAPTION_PREFIX, item["id"])
-                adjusted_captions += 1
 
         output_path = os.path.abspath(args.output) if args.output else input_path
         if output_path != input_path:

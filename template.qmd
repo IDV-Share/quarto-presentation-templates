@@ -140,7 +140,7 @@ Aligned to the bottom.
 
 ## Custom text box
 
-This slide hase some content and a custom text box.
+This slide hase some content and some custom text boxes.
 
 ::: {.pptx-box width="10cm" height="2in" x="20%" y="200pt" style="vertical-align: middle;"}
 This text is placed inside a custom box.
@@ -227,14 +227,14 @@ plt.show()
 
 ---
 
-## Slide with executed python code
-
 ```{python}
 #| tags: [parameters]
 
 alpha = 0.1
 ratio = 0.1
 ```
+
+## Slide with executed python code
 
 :::: {.columns}
 
@@ -251,7 +251,7 @@ plt.show()
 :::
 
 <!--- FIXME: vertical align is not supported in PowerPoint output --->
-::: {.column style="vertical-align: top;"}
+::: {.column}
 
 ```{python}
 #| label: fig-example
