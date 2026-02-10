@@ -522,15 +522,39 @@ def remove_marker_text(shape, prefix, marker_id):
         pass
 
 
-def collect_text_shapes(slide):
+def collect_text_shapes(slide, slide_height=None):
     items = []
     for shape in iter_shapes(slide):
         try:
             if shape.HasTextFrame and shape.TextFrame.HasText:
+                if is_footer_or_date(shape):
+                    continue
+                if slide_height is not None:
+                    try:
+                        if shape.Top > slide_height * 0.85:
+                            continue
+                    except Exception:
+                        pass
                 items.append(shape)
         except Exception:
             continue
     return items
+
+
+def is_footer_or_date(shape):
+    try:
+        p_type = placeholder_type(shape)
+    except Exception:
+        p_type = None
+
+    if p_type in {15, 16}:
+        return True
+
+    try:
+        name = (shape.Name or "").lower()
+    except Exception:
+        name = ""
+    return "footer" in name or "date" in name
 
 
 def collect_visual_shapes(slide):
@@ -1019,7 +1043,7 @@ def main():
                 adjusted_boxes += 1
 
             if caption_entries:
-                text_shapes = collect_text_shapes(slide)
+                text_shapes = collect_text_shapes(slide, presentation.PageSetup.SlideHeight)
                 visual_shapes = collect_visual_shapes(slide)
                 used_text_ids = set()
 
