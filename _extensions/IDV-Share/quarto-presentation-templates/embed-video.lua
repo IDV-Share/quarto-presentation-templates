@@ -1,12 +1,17 @@
 local videos = {}
 
+local function normalize_path(path)
+  -- Normalize Windows-style paths so the Python post-processor can resolve files on any OS.
+  return string.gsub(path, "\\", "/")
+end
+
 function Div(el)
   if el.classes:includes("embed-video") then
     local poster = el.attributes.poster
     local video = el.attributes.video
 
     if poster and video then
-      videos[poster] = video
+      videos[normalize_path(poster)] = normalize_path(video)
       -- Return the content of the div so the image is still rendered
       -- The Python script will later replace the image with a video
       return el.content
@@ -30,6 +35,11 @@ function Pandoc(doc)
   f:write(json)
   f:close()
 
-  print("[embed-video] wrote embed-video.json with " .. tostring(next(videos) ~= nil and "1" or "0") .. " mapping(s)")
+  local count = 0
+  for _ in pairs(videos) do
+    count = count + 1
+  end
+
+  print("[embed-video] wrote embed-video.json with " .. tostring(count) .. " mapping(s)")
   return doc
 end

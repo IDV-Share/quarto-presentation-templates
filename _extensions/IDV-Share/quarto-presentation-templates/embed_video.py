@@ -3,7 +3,8 @@ import shutil
 import sys
 import json
 import hashlib
-from pathlib import Path
+import posixpath
+from pathlib import Path, PurePosixPath
 from lxml import etree
 
 PML = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -40,6 +41,9 @@ def embed_video(pptx: Path, project_root: Path):
 
     # Read the PPTX into memory, modify files, then rebuild to avoid duplicate entries
     RELS_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+
+    def zip_norm(path: str) -> str:
+        return posixpath.normpath(str(PurePosixPath(path)))
 
     with zipfile.ZipFile(tmp, "r") as z:
         names = z.namelist()
@@ -95,14 +99,21 @@ def embed_video(pptx: Path, project_root: Path):
             rid = blip[0].get(f"{{{R}}}embed")
             rel = rels_xml.xpath(
                 f"//rel:Relationship[@Id='{rid}']",
-                namespaces={"rel": R},
+                namespaces={"rel": RELS_PKG},
             )
             if not rel:
                 continue
 
             img_pptx_target = rel[0].get("Target")
-            img_pptx_path = f"ppt/{img_pptx_target}"
+            img_pptx_path = zip_norm(str(PurePosixPath("ppt/slides") / img_pptx_target))
             img_data = original.get(img_pptx_path)
+
+            if not img_data:
+                # Fallback: some producers use targets relative to ppt/
+                alt_img_pptx_path = zip_norm(str(PurePosixPath("ppt") / img_pptx_target))
+                img_data = original.get(alt_img_pptx_path)
+                if img_data:
+                    img_pptx_path = alt_img_pptx_path
 
             if not img_data:
                 log(f"  Skipping image (not found in PPTX): {img_pptx_target}")
