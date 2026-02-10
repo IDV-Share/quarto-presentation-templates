@@ -3,12 +3,13 @@
 QMD ?= template.qmd
 PPTX ?= $(basename $(QMD)).pptx
 MAP ?= embed-video.json
+LAYOUT ?= pptx-layout.json
 PYTHON ?= python
-EMBED_SCRIPT ?= _extensions/IDV-Share/quarto-presentation-templates/embed-video.py
+POSTPROC_SCRIPT ?= _extensions/IDV-Share/quarto-presentation-templates/postprocess.py
 
 pptx:
 	quarto render $(QMD)
-	$(PYTHON) $(EMBED_SCRIPT) --input $(PPTX) --mapping $(MAP)
+	$(PYTHON) $(POSTPROC_SCRIPT) --input $(PPTX) --mapping $(MAP) --layout $(LAYOUT)
 
 clean:
-	rm -f $(PPTX) $(MAP)
+	rm -f $(PPTX) $(MAP) $(LAYOUT)

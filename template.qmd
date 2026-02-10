@@ -11,6 +11,8 @@ format:
         slide-number: c/t # not supported in PowerPoint output
         toc: true
         toc-depth: 1
+        fig-caption-size: 12pt
+        fig-caption-dy: -10pt
 ---
 
 <!-- Title Slide is inserted automatically -->
@@ -68,6 +70,20 @@ This slide contains both text and an image.
 
 ![Example Image](resources/media/viking-hero.jpg)
 
+---
+
+<!-- ## Figure caption styling
+
+:::: {.columns}
+::: {.column style="width: 40%; vertical-align: top;"}
+![Default caption size (from metadata)](resources/media/viking-hero.jpg)
+:::
+::: {.column style="width: 60%; vertical-align: bottom;"}
+![Custom caption size + offset](resources/media/superav_home.jpg){cap-size="10pt" cap-dy="0.15in"}
+:::
+:::: -->
+
+---
 
 <!-- SECTION  HEADER SLIDE-->
 
@@ -108,18 +124,27 @@ This slide contains both text and an image.
 ## Two-column layout
 
 :::: {.columns}
-
-<!--- FIXME: column width is not working in PowerPoint output --->
-::: {.column  style="width: 40%;"}
+::: {.column style="width: 40%; vertical-align: top;"}
 Column 1.
+Widht 40% of the slide.
+Aligned to the top.
 :::
-
-<!--- FIXME: column width is not working in PowerPoint output --->
-::: {.column style="width: 60%;"}
+::: {.column style="width: 60%; vertical-align: bottom;"}
 Column 2.
+Widht 60% of the slide.
+Aligned to the bottom.
 :::
-
 ::::
+
+---
+
+## Custom text box
+
+This slide hase some content and a custom text box.
+
+::: {.pptx-box width="10cm" height="2in" x="20%" y="200pt" style="vertical-align: middle;"}
+This text is placed inside a custom box.
+:::
 
 ---
 
