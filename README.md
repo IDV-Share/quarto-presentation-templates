@@ -40,3 +40,4 @@ quarto use template IDV-Share/quarto-presentation-templates
 - explain repository structure
 - make dummy guide files in main branch to guide the user to a proper use.
 - same python postprocess to force the use of specific slide layouts
+- windows and powerpoint requirements for the python postprocess

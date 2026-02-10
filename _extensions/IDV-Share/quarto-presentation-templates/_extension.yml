@@ -19,7 +19,7 @@ contributes:
       reference-doc: reference/IDV-template.pptx
       slide-level: 2
       filters:
-        - reduce-font.lua
+        - custom-font-size.lua
         - emphasis-colors.lua
         - custom-color.lua
         - embed-video.lua
