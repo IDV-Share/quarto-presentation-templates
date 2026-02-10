@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+from urllib.parse import urlparse
 
 
 PLACEHOLDER_PREFIX = "VIDEO::"
@@ -25,6 +26,8 @@ def load_mapping(path):
 def resolve_path(base_dir, path_value):
     if not path_value:
         return ""
+    if is_url(path_value):
+        return path_value
     if os.path.isabs(path_value):
         return path_value
     return os.path.abspath(os.path.join(base_dir, path_value))
@@ -41,6 +44,10 @@ def collect_mapping(entries, base_dir):
         mapping[video_id] = {
             "video": resolve_path(base_dir, entry.get("video", "")),
             "poster": resolve_path(base_dir, entry.get("poster", "")),
+            "width": entry.get("width", "") or "",
+            "height": entry.get("height", "") or "",
+            "x": entry.get("x", "") or "",
+            "y": entry.get("y", "") or "",
         }
     return mapping
 
@@ -219,6 +226,14 @@ def add_video(slide, video_path, bounds):
         return slide.Shapes.AddMovie(video_path, False, True, left, top, width, height)
 
 
+def add_video_url(slide, video_url, bounds):
+    left, top, width, height = bounds
+    try:
+        return slide.Shapes.AddMediaObject2(video_url, True, False, left, top, width, height)
+    except Exception:
+        return slide.Shapes.AddMovie(video_url, True, False, left, top, width, height)
+
+
 def apply_bounds(shape, bounds):
     left, top, width, height = bounds
     try:
@@ -239,6 +254,71 @@ def apply_rotation(shape, rotation):
         shape.Rotation = rotation
     except Exception:
         pass
+
+
+def is_url(value):
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+    return parsed.scheme in {"http", "https"}
+
+
+def parse_size(value, axis_size=None):
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+
+    try:
+        if text.endswith("%"):
+            if axis_size is None:
+                return None
+            percent = float(text[:-1])
+            return axis_size * (percent / 100.0)
+        if text.endswith("in"):
+            return float(text[:-2]) * 72.0
+        if text.endswith("cm"):
+            return float(text[:-2]) * (72.0 / 2.54)
+        if text.endswith("mm"):
+            return float(text[:-2]) * (72.0 / 25.4)
+        if text.endswith("pt"):
+            return float(text[:-2])
+        if text.endswith("px"):
+            return float(text[:-2]) * (72.0 / 96.0)
+        return float(text)
+    except ValueError:
+        return None
+
+
+def apply_custom_size(bounds, width, height, slide_width, slide_height, pos_x, pos_y):
+    left, top, base_width, base_height = bounds
+    custom_width = parse_size(width, slide_width)
+    custom_height = parse_size(height, slide_height)
+
+    if custom_width is None and custom_height is None:
+        custom_width = base_width
+        custom_height = base_height
+    elif custom_width is None:
+        aspect = base_width / base_height if base_height else 1.0
+        custom_width = custom_height * aspect
+    elif custom_height is None:
+        aspect = base_height / base_width if base_width else 1.0
+        custom_height = custom_width * aspect
+
+    center_x = left + (base_width / 2.0)
+    center_y = top + (base_height / 2.0)
+    new_left = center_x - (custom_width / 2.0)
+    new_top = center_y - (custom_height / 2.0)
+
+    override_x = parse_size(pos_x, slide_width)
+    override_y = parse_size(pos_y, slide_height)
+    if override_x is not None:
+        new_left = override_x
+    if override_y is not None:
+        new_top = override_y
+    return (new_left, new_top, custom_width, custom_height)
 
 
 def main():
@@ -319,7 +399,12 @@ def main():
                     continue
 
                 video_path = item.get("video", "")
-                if not video_path or not os.path.exists(video_path):
+                is_remote = is_url(video_path)
+                if not video_path:
+                    missing.append(video_id)
+                    debug(f"missing video file for id={video_id} path={video_path}")
+                    continue
+                if not is_remote and not os.path.exists(video_path):
                     missing.append(video_id)
                     debug(f"missing video file for id={video_id} path={video_path}")
                     continue
@@ -336,6 +421,15 @@ def main():
                         debug("marker is text; using heuristic placeholder bounds")
 
                 bounds = shape_bounds(target_shape)
+                bounds = apply_custom_size(
+                    bounds,
+                    item.get("width", ""),
+                    item.get("height", ""),
+                    presentation.PageSetup.SlideWidth,
+                    presentation.PageSetup.SlideHeight,
+                    item.get("x", ""),
+                    item.get("y", ""),
+                )
                 try:
                     rotation = target_shape.Rotation
                 except Exception:
@@ -345,17 +439,20 @@ def main():
                     f"bounds={bounds}"
                 )
 
-                target_shape.Delete()
-                if extra_delete is not None:
-                    extra_delete.Delete()
-
-                new_shape = add_video(slide, video_path, bounds)
+                if is_remote:
+                    new_shape = add_video_url(slide, video_path, bounds)
+                else:
+                    new_shape = add_video(slide, video_path, bounds)
                 apply_bounds(new_shape, bounds)
                 apply_rotation(new_shape, rotation)
                 try:
                     new_shape.AlternativeText = marker
                 except Exception:
                     pass
+
+                target_shape.Delete()
+                if extra_delete is not None:
+                    extra_delete.Delete()
                 replaced += 1
 
         output_path = os.path.abspath(args.output) if args.output else input_path

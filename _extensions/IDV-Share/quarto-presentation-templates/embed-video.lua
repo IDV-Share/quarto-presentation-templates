@@ -83,12 +83,22 @@ function Div(el)
   end
 
   local poster = el.attributes["poster"] or el.attributes["data-poster"] or ""
+  local width = el.attributes["width"] or el.attributes["data-width"] or ""
+  local height = el.attributes["height"] or el.attributes["data-height"] or ""
+  local pos_x = el.attributes["x"] or el.attributes["left"] or el.attributes["data-x"] or el.attributes["data-left"] or ""
+  local pos_y = el.attributes["y"] or el.attributes["top"] or el.attributes["data-y"] or el.attributes["data-top"] or ""
   local img = first_image(el.content)
   if poster == "" and img ~= nil then
     poster = img.src
   end
 
   debug("placeholder id=" .. id .. " video=" .. video .. " poster=" .. (poster ~= "" and poster or "<none>"))
+  if width ~= "" or height ~= "" then
+    debug("custom size width=" .. (width ~= "" and width or "<auto>") .. " height=" .. (height ~= "" and height or "<auto>"))
+  end
+  if pos_x ~= "" or pos_y ~= "" then
+    debug("custom position x=" .. (pos_x ~= "" and pos_x or "<auto>") .. " y=" .. (pos_y ~= "" and pos_y or "<auto>"))
+  end
 
   local alt_text = "VIDEO::" .. id
 
@@ -110,7 +120,11 @@ function Div(el)
   table.insert(placeholders, {
     id = id,
     video = video,
-    poster = poster
+    poster = poster,
+    width = width,
+    height = height,
+    x = pos_x,
+    y = pos_y
   })
 
   return placeholder
