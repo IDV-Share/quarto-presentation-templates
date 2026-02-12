@@ -17,6 +17,7 @@ VISUAL_TYPES = {3, 7, 10, 11, 13, 14, 16}
 COLUMN_PREFIX = "COLUMN::"
 BOX_PREFIX = "BOX::"
 BOX_END_PREFIX = "BOXEND::"
+LAYOUT_PREFIX = "LAYOUT::"
 TEXTBOX_ORIENTATION = 1
 EMU_PER_POINT = 12700.0
 
@@ -41,6 +42,7 @@ def load_layout(path):
     columns = data.get("columns", [])
     boxes = data.get("boxes", [])
     captions = data.get("captions", [])
+    slide_layouts = data.get("slide_layouts", [])
     caption_defaults = data.get("caption_defaults", {})
     if not isinstance(columns, list):
         columns = []
@@ -48,12 +50,15 @@ def load_layout(path):
         boxes = []
     if not isinstance(captions, list):
         captions = []
+    if not isinstance(slide_layouts, list):
+        slide_layouts = []
     if not isinstance(caption_defaults, dict):
         caption_defaults = {}
     return {
         "columns": columns,
         "boxes": boxes,
         "captions": captions,
+        "slide_layouts": slide_layouts,
         "caption_defaults": caption_defaults,
         "footer": data.get("footer", "") or "",
         "location": data.get("location", "") or "",
@@ -462,6 +467,28 @@ def extract_all_markers(text, prefix):
     return pattern.findall(text)
 
 
+def extract_layout_marker(text):
+    if not text or LAYOUT_PREFIX not in text:
+        return ""
+    index = text.find(LAYOUT_PREFIX)
+    raw = text[index + len(LAYOUT_PREFIX) :]
+    first_line = raw.splitlines()[0] if raw else ""
+    value = first_line.strip()
+    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+        value = value[1:-1].strip()
+    return value
+
+
+def strip_layout_marker(text):
+    if not text or LAYOUT_PREFIX not in text:
+        return text
+    cleaned = re.sub(re.escape(LAYOUT_PREFIX) + r"[^\r\n]*", "", text)
+    cleaned = re.sub(r"^[\s\r\n]+", "", cleaned)
+    cleaned = re.sub(r"[ \t]+\r", "\r", cleaned)
+    cleaned = re.sub(r"\r{2,}", "\r", cleaned)
+    return cleaned.strip(" \r\n\t")
+
+
 def normalize_text(text):
     if text is None:
         return ""
@@ -705,6 +732,133 @@ def placeholder_type(shape):
         return None
 
 
+def collect_slide_layout_rules(entries):
+    rules = {}
+    if not isinstance(entries, list):
+        return rules
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        layout_name = str(entry.get("layout", "")).strip()
+        if not layout_name:
+            continue
+        slide_ref = entry.get("slide", None)
+        try:
+            slide_index = int(str(slide_ref).strip())
+        except Exception:
+            continue
+        if slide_index <= 0:
+            continue
+        rules[slide_index] = layout_name
+    return rules
+
+
+def find_slide_layout_marker(slide):
+    for shape in iter_shapes(slide):
+        alt_text = shape_alt_text(shape)
+        name = extract_layout_marker(alt_text)
+        if name:
+            return name, shape, "alt"
+
+        text_value = shape_text(shape)
+        name = extract_layout_marker(text_value)
+        if name:
+            return name, shape, "text"
+    return "", None, ""
+
+
+def clear_slide_layout_marker(shape, source, debug=None):
+    if shape is None:
+        return
+    try:
+        if source == "alt":
+            current = shape.AlternativeText or ""
+            cleaned = strip_layout_marker(current)
+            shape.AlternativeText = cleaned
+            return
+
+        if source == "text":
+            if not shape.HasTextFrame:
+                return
+            current = shape.TextFrame.TextRange.Text or ""
+            cleaned = strip_layout_marker(current)
+            shape.TextFrame.TextRange.Text = cleaned
+    except Exception as exc:
+        if debug is not None:
+            debug(f"failed to clear layout marker: {exc}")
+
+
+def list_slide_layout_names(slide):
+    names = []
+    try:
+        custom_layouts = slide.Design.SlideMaster.CustomLayouts
+    except Exception:
+        return names
+    for index in range(1, custom_layouts.Count + 1):
+        try:
+            layout = custom_layouts(index)
+            names.append(layout.Name or "")
+        except Exception:
+            continue
+    return names
+
+
+def apply_slide_layout(slide, layout_name, debug=None):
+    wanted = (layout_name or "").strip()
+    if not wanted:
+        return False
+    wanted_lower = wanted.lower()
+
+    try:
+        custom_layouts = slide.Design.SlideMaster.CustomLayouts
+    except Exception as exc:
+        if debug is not None:
+            debug(f"custom layouts unavailable on slide {slide.SlideIndex}: {exc}")
+        return False
+
+    match = None
+    for index in range(1, custom_layouts.Count + 1):
+        try:
+            layout = custom_layouts(index)
+            name = (layout.Name or "").strip()
+        except Exception:
+            continue
+        if name.lower() == wanted_lower:
+            match = layout
+            break
+
+    if match is None:
+        for index in range(1, custom_layouts.Count + 1):
+            try:
+                layout = custom_layouts(index)
+                name = (layout.Name or "").strip()
+            except Exception:
+                continue
+            if wanted_lower in name.lower():
+                match = layout
+                break
+
+    if match is None:
+        if debug is not None:
+            available = [name for name in list_slide_layout_names(slide) if name]
+            debug(
+                f"layout '{wanted}' not found on slide {slide.SlideIndex}. "
+                f"available={available}"
+            )
+        return False
+
+    try:
+        slide.CustomLayout = match
+        if debug is not None:
+            debug(f"applied layout '{match.Name}' on slide {slide.SlideIndex}")
+        return True
+    except Exception as exc:
+        if debug is not None:
+            debug(f"failed to apply layout '{wanted}' on slide {slide.SlideIndex}: {exc}")
+        return False
+
+
 def apply_footer_location(presentation, footer_text, location_text, debug=None):
     if not footer_text and not location_text:
         return 0
@@ -846,6 +1000,7 @@ def process_with_python_pptx(
     caption_defaults,
     footer_text,
     location_text,
+    slide_layout_rules,
 ):
     del columns_by_id, boxes_by_id, caption_entries, caption_defaults, footer_text, location_text
 
@@ -872,8 +1027,22 @@ def process_with_python_pptx(
     replaced = 0
     missing = []
     skipped_remote = []
+    layout_requests = set()
 
-    for slide in presentation.slides:
+    for slide_index, slide in enumerate(presentation.slides, start=1):
+        requested_layout = slide_layout_rules.get(slide_index, "")
+        marker_layout = ""
+        for shape in slide.shapes:
+            alt_marker = extract_layout_marker(fallback_alt_text(shape))
+            text_marker = extract_layout_marker(fallback_shape_text(shape))
+            found = alt_marker or text_marker
+            if found and not marker_layout:
+                marker_layout = found
+        if requested_layout:
+            layout_requests.add(requested_layout)
+        if marker_layout:
+            layout_requests.add(marker_layout)
+
         # Iterate on a snapshot because we may delete shapes while processing.
         for shape in list(slide.shapes):
             marker = fallback_alt_text(shape)
@@ -957,6 +1126,11 @@ def process_with_python_pptx(
             "Warning: remote video URLs are not supported by python-pptx backend: "
             + ", ".join(unique_remote)
         )
+    if layout_requests:
+        print(
+            "Warning: forcing slide layouts is only supported by the Windows msoffice backend. "
+            f"Requested layout(s): {', '.join(sorted(layout_requests))}"
+        )
 
     print(f"Embedded {replaced} video(s).")
     if replaced >= 0:
@@ -1016,6 +1190,7 @@ def main():
         debug(f"layout file not found: {layout_path}")
 
     columns_by_id, boxes_by_id, caption_entries = collect_layout(layout)
+    slide_layout_rules = collect_slide_layout_rules(layout.get("slide_layouts", []))
     footer_text = layout.get("footer", "")
     location_text = layout.get("location", "")
     caption_defaults = layout.get("caption_defaults", {})
@@ -1035,6 +1210,7 @@ def main():
             caption_defaults=caption_defaults,
             footer_text=footer_text,
             location_text=location_text,
+            slide_layout_rules=slide_layout_rules,
         )
 
     if not sys.platform.startswith("win"):
@@ -1074,6 +1250,14 @@ def main():
 
         for slide in presentation.Slides:
             debug(f"slide {slide.SlideIndex}: shapes={slide.Shapes.Count}")
+            rule_layout_name = slide_layout_rules.get(slide.SlideIndex, "")
+            marker_layout_name, marker_shape, marker_source = find_slide_layout_marker(slide)
+            selected_layout_name = rule_layout_name or marker_layout_name
+            if selected_layout_name:
+                apply_slide_layout(slide, selected_layout_name, debug=debug)
+                if marker_shape is not None:
+                    clear_slide_layout_marker(marker_shape, marker_source, debug=debug)
+
             column_items = []
             box_items = []
 
@@ -1327,6 +1511,21 @@ def main():
                 if "CAPTION::" not in current:
                     continue
                 cleaned = strip_caption_markers(current)
+                if cleaned != current:
+                    try:
+                        shape.TextFrame.TextRange.Text = cleaned
+                    except Exception:
+                        pass
+
+            # Clean up any leftover layout markers from header attributes.
+            for shape in collect_text_shapes(slide):
+                try:
+                    current = shape.TextFrame.TextRange.Text or ""
+                except Exception:
+                    continue
+                if LAYOUT_PREFIX not in current:
+                    continue
+                cleaned = strip_layout_marker(current)
                 if cleaned != current:
                     try:
                         shape.TextFrame.TextRange.Text = cleaned

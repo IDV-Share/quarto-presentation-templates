@@ -5,6 +5,7 @@ local column_counter = 0
 local box_counter = 0
 local caption_counter = 0
 local DEFAULT_COLUMNS_LAYOUT = "Two Content"
+local LAYOUT_PREFIX = "LAYOUT::"
 
 local function truthy(value)
   if value == nil then
@@ -175,6 +176,35 @@ local function append_marker(blocks, marker)
   table.insert(blocks, pandoc.Para({ pandoc.Str(marker) }))
 end
 
+local function header_has_layout_marker(header)
+  local text = pandoc.utils.stringify(header.content or {})
+  return text:find(LAYOUT_PREFIX, 1, true) ~= nil
+end
+
+local function inject_layout_marker_into_header(header, layout_name)
+  if header == nil or layout_name == nil or layout_name == "" then
+    return
+  end
+  if header_has_layout_marker(header) then
+    return
+  end
+
+  local parts = {}
+  for part in string.gmatch(layout_name, "%S+") do
+    table.insert(parts, part)
+  end
+  if #parts == 0 then
+    return
+  end
+
+  table.insert(header.content, pandoc.Space())
+  table.insert(header.content, pandoc.Str(LAYOUT_PREFIX .. parts[1]))
+  for i = 2, #parts do
+    table.insert(header.content, pandoc.Space())
+    table.insert(header.content, pandoc.Str(parts[i]))
+  end
+end
+
 function Div(el)
   if has_class(el, "column") then
     column_counter = column_counter + 1
@@ -330,6 +360,17 @@ function Pandoc(doc)
   if current_header ~= nil and has_columns then
     if current_header.attributes["layout"] == nil and current_header.attributes["data-layout"] == nil then
       current_header.attributes["data-layout"] = columns_layout
+    end
+  end
+
+  -- Add explicit layout markers from header attributes so postprocess.py can
+  -- force master layouts in PowerPoint even when pandoc/quarto cannot.
+  for _, block in ipairs(doc.blocks) do
+    if block.t == "Header" and block.level == slide_level then
+      local layout_name = get_attr_value(block.attributes, { "layout", "data-layout" })
+      if layout_name ~= "" then
+        inject_layout_marker_into_header(block, layout_name)
+      end
     end
   end
 

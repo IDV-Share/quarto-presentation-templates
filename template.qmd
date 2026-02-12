@@ -30,6 +30,15 @@ format:
 
 ---
 
+## My custom layout slide {layout="2_Title and Content"}
+
+- This slide explicitly requests the `Title and Content` master layout.
+- Replace `Title and Content` with the exact layout name from your `.pptx` template.
+- This is applied by `postprocess.py` (Windows `msoffice` backend).
+- You can still use `LAYOUT::...` markers, but header attributes are preferred.
+
+---
+
 ## Text size filter
 
 [This is LARGE text]{.LARGE}
