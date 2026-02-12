@@ -9,3 +9,4 @@
 /_freeze/
 
 .vscode/
+!.vscode/launch.json

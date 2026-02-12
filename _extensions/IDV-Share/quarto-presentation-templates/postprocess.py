@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import sys
 import time
 import zipfile
@@ -17,6 +18,7 @@ COLUMN_PREFIX = "COLUMN::"
 BOX_PREFIX = "BOX::"
 BOX_END_PREFIX = "BOXEND::"
 TEXTBOX_ORIENTATION = 1
+EMU_PER_POINT = 12700.0
 
 
 def truthy(value):
@@ -762,6 +764,206 @@ def safe_delete(shape, debug=None):
         return False
 
 
+def detect_backend(name):
+    value = (name or "auto").strip().lower()
+    if value not in {"auto", "msoffice", "python-pptx", "libreoffice", "openoffice"}:
+        raise ValueError(f"Unsupported backend: {name}")
+
+    if value == "auto":
+        if sys.platform.startswith("win"):
+            return "msoffice"
+        return "python-pptx"
+    if value in {"libreoffice", "openoffice"}:
+        return "python-pptx"
+    return value
+
+
+def to_points(emu_value):
+    return float(emu_value) / EMU_PER_POINT
+
+
+def to_emu(points_value):
+    return int(round(float(points_value) * EMU_PER_POINT))
+
+
+def fallback_alt_text(shape):
+    try:
+        return shape._element.nvSpPr.cNvPr.get("descr", "") or ""
+    except Exception:
+        return ""
+
+
+def fallback_set_alt_text(shape, text):
+    try:
+        shape._element.nvSpPr.cNvPr.set("descr", text)
+    except Exception:
+        pass
+
+
+def fallback_shape_text(shape):
+    try:
+        if shape.has_text_frame:
+            return shape.text or ""
+    except Exception:
+        return ""
+    return ""
+
+
+def fallback_remove_shape(shape):
+    try:
+        element = shape._element
+        parent = element.getparent()
+        if parent is not None:
+            parent.remove(element)
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def ensure_soffice_available(debug=None):
+    candidates = ("soffice", "openoffice4", "openoffice")
+    for name in candidates:
+        path = shutil.which(name)
+        if path:
+            if debug is not None:
+                debug(f"office binary detected: {path}")
+            return path
+    if debug is not None:
+        debug("no LibreOffice/OpenOffice binary detected in PATH")
+    return ""
+
+
+def process_with_python_pptx(
+    input_path,
+    output_path,
+    mapping,
+    args,
+    debug,
+    columns_by_id,
+    boxes_by_id,
+    caption_entries,
+    caption_defaults,
+    footer_text,
+    location_text,
+):
+    del columns_by_id, boxes_by_id, caption_entries, caption_defaults, footer_text, location_text
+
+    try:
+        from pptx import Presentation  # type: ignore
+    except ImportError as exc:
+        print(
+            "python-pptx is required on non-Windows platforms. "
+            "Install it with: pip install python-pptx"
+        )
+        raise exc
+
+    # Disclaimer:
+    print("Warning: python-pptx backend has limited support, "
+          "if your presentation relies on postprocessing features "
+          "(layout adjustments, captions, footer/location) it may not work as "
+          "expected. For best results, use the msoffice backend on Windows or "
+          "post-process it manually.")
+
+    if args.backend in {"libreoffice", "openoffice"}:
+        ensure_soffice_available(debug=debug)
+
+    presentation = Presentation(input_path)
+    replaced = 0
+    missing = []
+    skipped_remote = []
+
+    for slide in presentation.slides:
+        # Iterate on a snapshot because we may delete shapes while processing.
+        for shape in list(slide.shapes):
+            marker = fallback_alt_text(shape)
+            text_value = fallback_shape_text(shape)
+            if not marker and PLACEHOLDER_PREFIX in text_value:
+                marker = text_value
+            if not marker.startswith(PLACEHOLDER_PREFIX):
+                continue
+
+            video_id = marker[len(PLACEHOLDER_PREFIX) :].strip()
+            item = mapping.get(video_id)
+            if not item:
+                missing.append(video_id)
+                debug(f"missing mapping for id={video_id}")
+                continue
+
+            video_path = item.get("video", "")
+            if not video_path:
+                missing.append(video_id)
+                debug(f"missing video file for id={video_id}")
+                continue
+            if is_url(video_path):
+                skipped_remote.append(video_id)
+                debug(f"skipping remote URL for id={video_id} on python-pptx backend")
+                continue
+            if not os.path.exists(video_path):
+                missing.append(video_id)
+                debug(f"missing video file for id={video_id} path={video_path}")
+                continue
+
+            bounds_pt = (
+                to_points(shape.left),
+                to_points(shape.top),
+                to_points(shape.width),
+                to_points(shape.height),
+            )
+            bounds_pt = apply_custom_size(
+                bounds_pt,
+                item.get("width", ""),
+                item.get("height", ""),
+                to_points(presentation.slide_width),
+                to_points(presentation.slide_height),
+                item.get("x", ""),
+                item.get("y", ""),
+            )
+
+            try:
+                movie = slide.shapes.add_movie(
+                    video_path,
+                    to_emu(bounds_pt[0]),
+                    to_emu(bounds_pt[1]),
+                    to_emu(bounds_pt[2]),
+                    to_emu(bounds_pt[3]),
+                    mime_type="video/mp4",
+                )
+                fallback_set_alt_text(movie, marker)
+                fallback_remove_shape(shape)
+                replaced += 1
+            except Exception as exc:
+                debug(f"failed to embed id={video_id}: {exc}")
+                missing.append(video_id)
+
+    presentation.save(output_path)
+
+    if not args.keep_mapping:
+        for path, label in ((os.path.abspath(args.mapping), "mapping"), (os.path.abspath(args.layout), "layout")):
+            try:
+                os.remove(path)
+                debug(f"deleted {label} file: {path}")
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                debug(f"failed to delete {label} file: {exc}")
+
+    if missing:
+        unique_missing = sorted(set(missing))
+        print("Warning: missing videos for placeholders:", ", ".join(unique_missing))
+    if skipped_remote:
+        unique_remote = sorted(set(skipped_remote))
+        print(
+            "Warning: remote video URLs are not supported by python-pptx backend: "
+            + ", ".join(unique_remote)
+        )
+
+    print(f"Embedded {replaced} video(s).")
+    if replaced >= 0:
+        print("Layout adjustments (columns/boxes/captions/footer) require the Windows msoffice backend.")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Embed videos into a PPTX using placeholders.")
     parser.add_argument("--input", required=True, help="Path to the PPTX to post-process.")
@@ -770,6 +972,15 @@ def main():
     parser.add_argument("--output", default="", help="Optional output PPTX path.")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging.")
     parser.add_argument("--keep-mapping", action="store_true", help="Do not delete mapping file.")
+    parser.add_argument(
+        "--backend",
+        default="auto",
+        choices=["auto", "msoffice", "python-pptx", "libreoffice", "openoffice"],
+        help=(
+            "Processing backend. 'auto' uses msoffice on Windows and python-pptx elsewhere. "
+            "'libreoffice' and 'openoffice' aliases currently use the python-pptx backend."
+        ),
+    )
     args = parser.parse_args()
 
     debug_enabled = args.debug or truthy(os.getenv("EMBED_VIDEO_DEBUG", ""))
@@ -808,11 +1019,32 @@ def main():
     footer_text = layout.get("footer", "")
     location_text = layout.get("location", "")
     caption_defaults = layout.get("caption_defaults", {})
+    output_path = os.path.abspath(args.output) if args.output else input_path
+    backend = detect_backend(args.backend)
+
+    if backend != "msoffice":
+        return process_with_python_pptx(
+            input_path=input_path,
+            output_path=output_path,
+            mapping=mapping,
+            args=args,
+            debug=debug,
+            columns_by_id=columns_by_id,
+            boxes_by_id=boxes_by_id,
+            caption_entries=caption_entries,
+            caption_defaults=caption_defaults,
+            footer_text=footer_text,
+            location_text=location_text,
+        )
+
+    if not sys.platform.startswith("win"):
+        print("msoffice backend is only available on Windows. Use --backend python-pptx on this OS.")
+        return 2
 
     try:
         import win32com.client  # type: ignore
     except ImportError as exc:
-        print("pywin32 is required to embed videos. Install it with: pip install pywin32")
+        print("pywin32 is required for msoffice backend. Install it with: pip install pywin32")
         raise exc
 
     if not wait_for_pptx_ready(input_path, debug=debug):
@@ -1101,7 +1333,6 @@ def main():
                     except Exception:
                         pass
 
-        output_path = os.path.abspath(args.output) if args.output else input_path
         if output_path != input_path:
             presentation.SaveAs(output_path)
         else:
