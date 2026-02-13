@@ -5,4 +5,4 @@ dependencies:
   - pip=25.1
   - python=3.13.2
   - pip:
-    - -r requirements.txt
+      - -r requirements.txt

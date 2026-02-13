@@ -38,6 +38,34 @@ format:
 
 This disables marker injection in Lua filters (`pptx-layout.lua`, `embed-video.lua`).
 
+## Build Tooling
+
+This extension ships its own build and dependency files:
+
+- `Makefile`
+- `requirements.txt`
+- `environment.yml`
+
+Direct usage from a project root:
+
+```bash
+make -f _extensions/IDV-Share/quarto-presentation-templates/Makefile pptx QMD=template.qmd
+make -f _extensions/IDV-Share/quarto-presentation-templates/Makefile template.qmd
+```
+
+Optional root wrapper (for short commands like `make template.qmd`):
+
+```make
+.PHONY: pptx clean
+EXT_MAKEFILE := _extensions/IDV-Share/quarto-presentation-templates/Makefile
+
+pptx clean:
+	$(MAKE) -f "$(EXT_MAKEFILE)" $@
+
+%.qmd:
+	$(MAKE) -f "$(EXT_MAKEFILE)" "$@"
+```
+
 
 ## For Developers
 
