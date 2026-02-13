@@ -17,7 +17,16 @@ VISUAL_TYPES = {3, 7, 10, 11, 13, 14, 16}
 COLUMN_PREFIX = "COLUMN::"
 BOX_PREFIX = "BOX::"
 BOX_END_PREFIX = "BOXEND::"
+CAPTION_PREFIX = "CAPTION::"
 LAYOUT_PREFIX = "LAYOUT::"
+ESCAPABLE_MARKER_PREFIXES = (
+    PLACEHOLDER_PREFIX,
+    COLUMN_PREFIX,
+    BOX_PREFIX,
+    BOX_END_PREFIX,
+    CAPTION_PREFIX,
+    LAYOUT_PREFIX,
+)
 TEXTBOX_ORIENTATION = 1
 EMU_PER_POINT = 12700.0
 
@@ -450,28 +459,29 @@ def apply_custom_size(bounds, width, height, slide_width, slide_height, pos_x, p
 
 
 def extract_marker(text, prefix):
-    index = text.find(prefix)
-    if index == -1:
+    if not text:
         return ""
-    start = index + len(prefix)
-    end = start
-    while end < len(text) and not text[end].isspace():
-        end += 1
-    return text[start:end]
+    pattern = re.compile(r"(?<!\\)" + re.escape(prefix) + r"([^\s]+)")
+    match = pattern.search(text)
+    if not match:
+        return ""
+    return match.group(1)
 
 
 def extract_all_markers(text, prefix):
     if not text:
         return []
-    pattern = re.compile(re.escape(prefix) + r"([^\s]+)")
+    pattern = re.compile(r"(?<!\\)" + re.escape(prefix) + r"([^\s]+)")
     return pattern.findall(text)
 
 
 def extract_layout_marker(text):
-    if not text or LAYOUT_PREFIX not in text:
+    if not text:
         return ""
-    index = text.find(LAYOUT_PREFIX)
-    raw = text[index + len(LAYOUT_PREFIX) :]
+    match = re.search(r"(?<!\\)" + re.escape(LAYOUT_PREFIX), text)
+    if not match:
+        return ""
+    raw = text[match.end() :]
     first_line = raw.splitlines()[0] if raw else ""
     value = first_line.strip()
     if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
@@ -482,7 +492,7 @@ def extract_layout_marker(text):
 def strip_layout_marker(text):
     if not text or LAYOUT_PREFIX not in text:
         return text
-    cleaned = re.sub(re.escape(LAYOUT_PREFIX) + r"[^\r\n]*", "", text)
+    cleaned = re.sub(r"(?<!\\)" + re.escape(LAYOUT_PREFIX) + r"[^\r\n]*", "", text)
     cleaned = re.sub(r"^[\s\r\n]+", "", cleaned)
     cleaned = re.sub(r"[ \t]+\r", "\r", cleaned)
     cleaned = re.sub(r"\r{2,}", "\r", cleaned)
@@ -516,13 +526,22 @@ def extract_box_segment(text, box_id):
 
 
 def strip_caption_markers(text):
-    if not text or "CAPTION::" not in text:
+    if not text or CAPTION_PREFIX not in text:
         return text
-    cleaned = re.sub(r"\bCAPTION::[^\s]+\b", "", text)
+    cleaned = re.sub(r"(?<!\\)" + re.escape(CAPTION_PREFIX) + r"[^\s]+", "", text)
     cleaned = re.sub(r"^[\s\r\n]+", "", cleaned)
     cleaned = re.sub(r"[ \t]+\r", "\r", cleaned)
     cleaned = re.sub(r"\r{2,}", "\r", cleaned)
     return cleaned.strip(" \r\n\t")
+
+
+def unescape_marker_prefixes(text):
+    if not text or "\\" not in text:
+        return text
+    cleaned = text
+    for prefix in ESCAPABLE_MARKER_PREFIXES:
+        cleaned = cleaned.replace(f"\\{prefix}", prefix)
+    return cleaned
 
 
 def remove_marker_text(shape, prefix, marker_id):
@@ -592,6 +611,24 @@ def collect_visual_shapes(slide):
         if is_visual_shape(shape):
             items.append(shape)
     return items
+
+
+def collect_caption_shapes(slide, slide_height=None):
+    by_id = {}
+    ordered_ids = []
+    for shape in collect_text_shapes(slide, slide_height):
+        text = shape_text(shape)
+        if not text or CAPTION_PREFIX not in text:
+            continue
+        marker_ids = extract_all_markers(text, CAPTION_PREFIX)
+        if not marker_ids:
+            continue
+        for marker_id in marker_ids:
+            if not marker_id or marker_id in by_id:
+                continue
+            by_id[marker_id] = shape
+            ordered_ids.append(marker_id)
+    return by_id, ordered_ids
 
 
 def shape_identity(shape):
@@ -1234,8 +1271,6 @@ def main():
     adjusted_boxes = 0
     adjusted_captions = 0
     missing = []
-    caption_index = 0
-
     try:
         try:
             presentation = app.Presentations.Open(input_path, WithWindow=False, ReadOnly=False)
@@ -1457,48 +1492,61 @@ def main():
                 adjusted_boxes += 1
 
             if caption_entries:
-                text_shapes = collect_text_shapes(slide, presentation.PageSetup.SlideHeight)
-                visual_shapes = collect_visual_shapes(slide)
-                used_text_ids = set()
+                caption_shapes_by_id, caption_ids_ordered = collect_caption_shapes(slide)
+                if caption_ids_ordered:
+                    caption_entries_by_id = {}
+                    fallback_entries = []
+                    for entry in caption_entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        entry_id = str(entry.get("id", "")).strip()
+                        if entry_id:
+                            caption_entries_by_id[entry_id] = entry
+                        else:
+                            fallback_entries.append(entry)
 
-                visual_shapes = sorted(
-                    visual_shapes, key=lambda s: (shape_bounds(s)[1], shape_bounds(s)[0])
-                )
-                for visual in visual_shapes:
-                    caption_shape = find_caption_for_image(visual, text_shapes, used_text_ids)
-                    if caption_shape is None:
-                        continue
+                    used_text_ids = set()
+                    fallback_index = 0
 
-                    if caption_index < len(caption_entries):
-                        entry = caption_entries[caption_index]
-                        caption_index += 1
-                    else:
-                        entry = {}
+                    for caption_id in caption_ids_ordered:
+                        caption_shape = caption_shapes_by_id.get(caption_id)
+                        if caption_shape is None:
+                            continue
+                        shape_id = shape_identity(caption_shape)
+                        if shape_id in used_text_ids:
+                            continue
 
-                    settings = merge_caption_settings(caption_defaults, entry)
+                        entry = caption_entries_by_id.get(caption_id)
+                        if entry is None and fallback_index < len(fallback_entries):
+                            entry = fallback_entries[fallback_index]
+                            fallback_index += 1
+                        if entry is None:
+                            entry = {}
 
-                    font_size = parse_font_size(settings.get("size", ""))
-                    if font_size is not None:
-                        try:
-                            caption_shape.TextFrame.TextRange.Font.Size = font_size
-                        except Exception:
-                            pass
+                        settings = merge_caption_settings(caption_defaults, entry)
 
-                    dx = parse_size(settings.get("dx", ""), presentation.PageSetup.SlideWidth)
-                    dy = parse_size(settings.get("dy", ""), presentation.PageSetup.SlideHeight)
-                    if dx is not None:
-                        try:
-                            caption_shape.Left = caption_shape.Left + dx
-                        except Exception:
-                            pass
-                    if dy is not None:
-                        try:
-                            caption_shape.Top = caption_shape.Top + dy
-                        except Exception:
-                            pass
+                        font_size = parse_font_size(settings.get("size", ""))
+                        if font_size is not None:
+                            try:
+                                caption_shape.TextFrame.TextRange.Font.Size = font_size
+                            except Exception:
+                                pass
 
-                    used_text_ids.add(shape_identity(caption_shape))
-                    adjusted_captions += 1
+                        dx = parse_size(settings.get("dx", ""), presentation.PageSetup.SlideWidth)
+                        dy = parse_size(settings.get("dy", ""), presentation.PageSetup.SlideHeight)
+                        if dx is not None:
+                            try:
+                                caption_shape.Left = caption_shape.Left + dx
+                            except Exception:
+                                pass
+                        if dy is not None:
+                            try:
+                                caption_shape.Top = caption_shape.Top + dy
+                            except Exception:
+                                pass
+
+                        used_text_ids.add(shape_id)
+                        adjusted_captions += 1
 
             # Clean up any leftover caption markers from older runs.
             for shape in collect_text_shapes(slide):
@@ -1506,7 +1554,7 @@ def main():
                     current = shape.TextFrame.TextRange.Text or ""
                 except Exception:
                     continue
-                if "CAPTION::" not in current:
+                if CAPTION_PREFIX not in current:
                     continue
                 cleaned = strip_caption_markers(current)
                 if cleaned != current:
@@ -1524,6 +1572,21 @@ def main():
                 if LAYOUT_PREFIX not in current:
                     continue
                 cleaned = strip_layout_marker(current)
+                if cleaned != current:
+                    try:
+                        shape.TextFrame.TextRange.Text = cleaned
+                    except Exception:
+                        pass
+
+            # Allow writing marker keywords literally with escaped prefixes.
+            for shape in collect_text_shapes(slide):
+                try:
+                    current = shape.TextFrame.TextRange.Text or ""
+                except Exception:
+                    continue
+                if "\\" not in current:
+                    continue
+                cleaned = unescape_marker_prefixes(current)
                 if cleaned != current:
                     try:
                         shape.TextFrame.TextRange.Text = cleaned
