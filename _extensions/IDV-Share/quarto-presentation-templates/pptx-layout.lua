@@ -177,38 +177,111 @@ local function caption_has_marker(caption)
   return text:find("CAPTION::") ~= nil
 end
 
-local function append_marker_to_caption(image, marker)
-  if image.caption == nil then
+local function append_marker_to_caption_value(caption, marker)
+  if caption == nil then
+    return caption, false
+  end
+
+  local function append_to_inlines(inlines)
+    if inlines == nil then
+      return false
+    end
+    if #inlines > 0 then
+      table.insert(inlines, pandoc.Space())
+      table.insert(inlines, pandoc.Str(marker))
+      return true
+    end
     return false
   end
 
-  if type(image.caption) == "table" and image.caption.long ~= nil then
-    local blocks = image.caption.long
-    if #blocks == 0 then
-      table.insert(blocks, pandoc.Para({ pandoc.Str(marker) }))
-    else
-      local last = blocks[#blocks]
-      if last.t == "Para" or last.t == "Plain" then
-        table.insert(last.content, pandoc.Space())
-        table.insert(last.content, pandoc.Str(marker))
-      else
-        table.insert(blocks, pandoc.Para({ pandoc.Str(marker) }))
-      end
-    end
-    image.caption.long = blocks
-    return true
-  end
-
-  if type(image.caption) == "table" then
-    if #image.caption == 0 then
+  local function append_to_blocks(blocks)
+    if blocks == nil then
       return false
     end
-    table.insert(image.caption, pandoc.Space())
-    table.insert(image.caption, pandoc.Str(marker))
-    return true
+    for i = #blocks, 1, -1 do
+      local block = blocks[i]
+      if block.t == "Para" or block.t == "Plain" then
+        table.insert(block.content, pandoc.Space())
+        table.insert(block.content, pandoc.Str(marker))
+        return true
+      end
+    end
+    return false
   end
 
-  return false
+  local appended = false
+
+  local ok_long_get, long_blocks = pcall(function()
+    return caption.long
+  end)
+  if ok_long_get and long_blocks ~= nil then
+    local blocks = long_blocks
+    local ok = append_to_blocks(blocks)
+    if not ok then
+      local caption_text = pandoc.utils.stringify(caption)
+      if caption_text ~= nil and caption_text ~= "" then
+        blocks = {
+          pandoc.Plain({
+            pandoc.Str(caption_text),
+            pandoc.Space(),
+            pandoc.Str(marker)
+          })
+        }
+        ok = true
+      end
+    end
+    if not ok then
+      return caption, false
+    end
+    local ok_long_set = pcall(function()
+      caption.long = blocks
+    end)
+    if ok_long_set then
+      appended = true
+    end
+  end
+
+  local ok_short_get, short_inlines = pcall(function()
+    return caption.short
+  end)
+  if ok_short_get and short_inlines ~= nil then
+    local inlines = short_inlines
+    local ok = append_to_inlines(inlines)
+    if not ok then
+      local short_text = pandoc.utils.stringify(short_inlines)
+      if short_text ~= nil and short_text ~= "" then
+        inlines = {
+          pandoc.Str(short_text),
+          pandoc.Space(),
+          pandoc.Str(marker)
+        }
+        ok = true
+      end
+    end
+    if ok then
+      local ok_short_set = pcall(function()
+        caption.short = inlines
+      end)
+      if ok_short_set then
+        appended = true
+      end
+    end
+  end
+
+  if appended then
+    return caption, true
+  end
+
+  if type(caption) == "table" then
+    if #caption > 0 then
+      table.insert(caption, pandoc.Space())
+      table.insert(caption, pandoc.Str(marker))
+      return caption, true
+    end
+    return caption, false
+  end
+
+  return caption, false
 end
 
 local function parse_style(style)
@@ -245,6 +318,18 @@ local function append_marker(blocks, marker)
   end
 
   table.insert(blocks, pandoc.Para({ pandoc.Str(marker) }))
+end
+
+local function append_marker_existing(blocks, marker)
+  for i = #blocks, 1, -1 do
+    local block = blocks[i]
+    if block.t == "Para" or block.t == "Plain" then
+      table.insert(block.content, pandoc.Space())
+      table.insert(block.content, pandoc.Str(marker))
+      return true
+    end
+  end
+  return false
 end
 
 local function clean_font_family(value)
@@ -306,7 +391,11 @@ function Div(el)
     local valign = el.attributes["valign"] or el.attributes["vertical-align"] or styles["vertical-align"] or ""
 
     local marker = "COLUMN::" .. id
-    inject_marker(el.content, marker)
+    local marker_ok = append_marker_existing(el.content, marker)
+    if not marker_ok then
+      debug("column id=" .. id .. " has no paragraph/plain block for marker injection; skipping marker.")
+      return el
+    end
 
     debug("column id=" .. id .. " width=" .. (width ~= "" and width or "<auto>") .. " valign=" .. (valign ~= "" and valign or "<auto>"))
 
@@ -426,61 +515,159 @@ function Div(el)
 
 end
 
+local function caption_entry_exists(id)
+  if id == nil or id == "" then
+    return false
+  end
+  for _, entry in ipairs(captions) do
+    if entry.id == id then
+      return true
+    end
+  end
+  return false
+end
+
+local function element_identifier(el)
+  if el == nil then
+    return ""
+  end
+  local id = el.identifier
+  if id ~= nil and id ~= "" then
+    return id
+  end
+  if el.attr ~= nil and el.attr.identifier ~= nil and el.attr.identifier ~= "" then
+    return el.attr.identifier
+  end
+  return ""
+end
+
+local function element_attributes(el)
+  if el == nil then
+    return {}
+  end
+  if el.attributes ~= nil then
+    return el.attributes
+  end
+  if el.attr ~= nil and el.attr.attributes ~= nil then
+    return el.attr.attributes
+  end
+  return {}
+end
+
+local function register_caption_marker(el, source_label)
+  if el == nil then
+    return false
+  end
+  if el.caption == nil then
+    debug(source_label .. " caption skipped: no caption field")
+    return false
+  end
+  if caption_has_marker(el.caption) then
+    debug(source_label .. " caption skipped: marker already present")
+    return false
+  end
+
+  local has_caption = pandoc.utils.stringify(el.caption)
+  if has_caption == nil or has_caption == "" then
+    debug(source_label .. " caption skipped: empty caption text")
+    return false
+  end
+
+  local id = element_identifier(el)
+  if id == nil or id == "" then
+    caption_counter = caption_counter + 1
+    id = "caption-" .. tostring(caption_counter)
+  end
+
+  local marker = "CAPTION::" .. id
+  local updated_caption, ok = append_marker_to_caption_value(el.caption, marker)
+  if not ok then
+    debug(source_label .. " caption skipped: unable to append marker")
+    return false
+  end
+  el.caption = updated_caption
+
+  if not caption_entry_exists(id) then
+    local attrs = element_attributes(el)
+    local size = get_attr_value(attrs, {
+      "cap-size",
+      "caption-size",
+      "fig-caption-size",
+      "fig-cap-size"
+    })
+    local dx = get_attr_value(attrs, {
+      "cap-dx",
+      "caption-dx",
+      "fig-caption-dx"
+    })
+    local dy = get_attr_value(attrs, {
+      "cap-dy",
+      "caption-dy",
+      "fig-caption-dy"
+    })
+
+    table.insert(captions, {
+      id = id,
+      size = size,
+      dx = dx,
+      dy = dy
+    })
+
+    debug(source_label .. " caption id=" .. id .. " size=" .. (size ~= "" and size or "<auto>") .. " dx=" .. (dx ~= "" and dx or "<auto>") .. " dy=" .. (dy ~= "" and dy or "<auto>"))
+  else
+    debug(source_label .. " caption id=" .. id .. " already registered; marker injected only")
+  end
+
+  return true
+end
+
+local function walk_blocks_for_figure_captions(blocks, stats)
+  if blocks == nil then
+    return
+  end
+  for _, block in ipairs(blocks) do
+    if block.t == "Figure" then
+      if stats ~= nil then
+        stats.figures = stats.figures + 1
+      end
+      register_caption_marker(block, "figure(scan)")
+    end
+
+    if block.t == "Div" or block.t == "BlockQuote" then
+      if stats ~= nil and block.t == "Div" and has_class(block, "cell-output-display") then
+        stats.cell_output_divs = stats.cell_output_divs + 1
+      end
+      walk_blocks_for_figure_captions(block.content, stats)
+    elseif block.t == "BulletList" or block.t == "OrderedList" then
+      for _, item in ipairs(block.content or {}) do
+        walk_blocks_for_figure_captions(item, stats)
+      end
+    elseif block.t == "DefinitionList" then
+      for _, item in ipairs(block.content or {}) do
+        local defs = item[2] or {}
+        for _, def_blocks in ipairs(defs) do
+          walk_blocks_for_figure_captions(def_blocks, stats)
+        end
+      end
+    end
+  end
+end
+
 function Image(el)
   if postprocess_disabled_state() then
     return nil
   end
 
-  if el.caption == nil then
-    return nil
-  end
-  if caption_has_marker(el.caption) then
-    return nil
-  end
+  register_caption_marker(el, "image")
+  return el
+end
 
-  local has_caption = pandoc.utils.stringify(el.caption)
-  if has_caption == nil or has_caption == "" then
+function Figure(el)
+  if postprocess_disabled_state() then
     return nil
   end
 
-  caption_counter = caption_counter + 1
-  local id = el.identifier
-  if id == nil or id == "" then
-    id = "caption-" .. tostring(caption_counter)
-  end
-
-  local marker = "CAPTION::" .. id
-  local ok = append_marker_to_caption(el, marker)
-  if not ok then
-    return nil
-  end
-
-  local size = get_attr_value(el.attributes, {
-    "cap-size",
-    "caption-size",
-    "fig-caption-size",
-    "fig-cap-size"
-  })
-  local dx = get_attr_value(el.attributes, {
-    "cap-dx",
-    "caption-dx",
-    "fig-caption-dx"
-  })
-  local dy = get_attr_value(el.attributes, {
-    "cap-dy",
-    "caption-dy",
-    "fig-caption-dy"
-  })
-
-  table.insert(captions, {
-    id = id,
-    size = size,
-    dx = dx,
-    dy = dy
-  })
-
-  debug("caption id=" .. id .. " size=" .. (size ~= "" and size or "<auto>") .. " dx=" .. (dx ~= "" and dx or "<auto>") .. " dy=" .. (dy ~= "" and dy or "<auto>"))
-
+  register_caption_marker(el, "figure")
   return el
 end
 
@@ -491,6 +678,12 @@ function Pandoc(doc)
     debug("postprocess disabled: layout and marker injection skipped.")
     return strip_marker_tokens(doc)
   end
+
+  -- Fallback for executed-code figures nested in Div blocks when Figure callback
+  -- is not dispatched by the surrounding filter pipeline.
+  local scan_stats = { figures = 0, cell_output_divs = 0 }
+  walk_blocks_for_figure_captions(doc.blocks, scan_stats)
+  debug("figure scan stats: figures=" .. tostring(scan_stats.figures) .. " cell-output-divs=" .. tostring(scan_stats.cell_output_divs))
 
   local footer = get_meta_value(doc, "footer")
   local location = get_meta_value(doc, "location")
