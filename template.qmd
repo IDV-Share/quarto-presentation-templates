@@ -64,6 +64,16 @@ format:
 
 ---
 
+## Styled div block
+
+::: {style="font-size:14pt; font-weight:bold; font-family:Arial;"}
+- This whole `:::` block is styled by `postprocess.py`.
+- Supported attributes: `font-size`, `font-style`, `font-weight`, `font-family` (or via `style="..."`).
+- Useful when Quarto/Pandoc cannot force these properties directly in PPTX.
+:::
+
+---
+
 ## Custom color filter
 
 This is [red text]{style="color:#FF0000;"}.

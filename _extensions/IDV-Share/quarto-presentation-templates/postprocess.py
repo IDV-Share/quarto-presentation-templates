@@ -18,6 +18,8 @@ COLUMN_PREFIX = "COLUMN::"
 BOX_PREFIX = "BOX::"
 BOX_END_PREFIX = "BOXEND::"
 CAPTION_PREFIX = "CAPTION::"
+TEXTBLOCK_PREFIX = "TEXTBLOCK::"
+TEXTBLOCK_END_PREFIX = "TEXTBLOCKEND::"
 LAYOUT_PREFIX = "LAYOUT::"
 ESCAPABLE_MARKER_PREFIXES = (
     PLACEHOLDER_PREFIX,
@@ -25,6 +27,8 @@ ESCAPABLE_MARKER_PREFIXES = (
     BOX_PREFIX,
     BOX_END_PREFIX,
     CAPTION_PREFIX,
+    TEXTBLOCK_PREFIX,
+    TEXTBLOCK_END_PREFIX,
     LAYOUT_PREFIX,
 )
 TEXTBOX_ORIENTATION = 1
@@ -47,10 +51,19 @@ def load_layout(path):
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
-        return {"columns": [], "boxes": [], "captions": [], "caption_defaults": {}, "footer": "", "location": ""}
+        return {
+            "columns": [],
+            "boxes": [],
+            "captions": [],
+            "text_blocks": [],
+            "caption_defaults": {},
+            "footer": "",
+            "location": "",
+        }
     columns = data.get("columns", [])
     boxes = data.get("boxes", [])
     captions = data.get("captions", [])
+    text_blocks = data.get("text_blocks", [])
     slide_layouts = data.get("slide_layouts", [])
     caption_defaults = data.get("caption_defaults", {})
     if not isinstance(columns, list):
@@ -59,6 +72,8 @@ def load_layout(path):
         boxes = []
     if not isinstance(captions, list):
         captions = []
+    if not isinstance(text_blocks, list):
+        text_blocks = []
     if not isinstance(slide_layouts, list):
         slide_layouts = []
     if not isinstance(caption_defaults, dict):
@@ -67,6 +82,7 @@ def load_layout(path):
         "columns": columns,
         "boxes": boxes,
         "captions": captions,
+        "text_blocks": text_blocks,
         "slide_layouts": slide_layouts,
         "caption_defaults": caption_defaults,
         "footer": data.get("footer", "") or "",
@@ -107,6 +123,7 @@ def collect_layout(entries):
     columns = {}
     boxes = {}
     captions = []
+    text_blocks = {}
     for entry in entries.get("columns", []):
         if isinstance(entry, dict) and entry.get("id"):
             columns[entry["id"]] = entry
@@ -116,7 +133,10 @@ def collect_layout(entries):
     for entry in entries.get("captions", []):
         if isinstance(entry, dict):
             captions.append(entry)
-    return columns, boxes, captions
+    for entry in entries.get("text_blocks", []):
+        if isinstance(entry, dict) and entry.get("id"):
+            text_blocks[entry["id"]] = entry
+    return columns, boxes, captions, text_blocks
 
 
 def iter_shapes(slide):
@@ -535,6 +555,17 @@ def strip_caption_markers(text):
     return cleaned.strip(" \r\n\t")
 
 
+def strip_text_block_markers(text):
+    if not text or (TEXTBLOCK_PREFIX not in text and TEXTBLOCK_END_PREFIX not in text):
+        return text
+    cleaned = re.sub(r"(?<!\\)" + re.escape(TEXTBLOCK_PREFIX) + r"[^\s]+", "", text)
+    cleaned = re.sub(r"(?<!\\)" + re.escape(TEXTBLOCK_END_PREFIX) + r"[^\s]+", "", cleaned)
+    cleaned = re.sub(r"^[\s\r\n]+", "", cleaned)
+    cleaned = re.sub(r"[ \t]+\r", "\r", cleaned)
+    cleaned = re.sub(r"\r{2,}", "\r", cleaned)
+    return cleaned.strip(" \r\n\t")
+
+
 def unescape_marker_prefixes(text):
     if not text or "\\" not in text:
         return text
@@ -723,6 +754,90 @@ def parse_font_size(value):
     if str(value).strip().endswith("%"):
         return None
     return parse_size(value, None)
+
+
+def parse_font_weight(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+
+    if text in {"bold", "bolder"}:
+        return -1
+    if text in {"normal", "regular", "lighter"}:
+        return 0
+
+    try:
+        numeric = int(text)
+    except ValueError:
+        return None
+    return -1 if numeric >= 600 else 0
+
+
+def apply_text_block_style(shape, entry):
+    if not isinstance(entry, dict):
+        return False
+
+    try:
+        if not shape.HasTextFrame or not shape.TextFrame.HasText:
+            return False
+    except Exception:
+        return False
+
+    try:
+        text_range = shape.TextFrame.TextRange
+        font = text_range.Font
+    except Exception:
+        return False
+
+    changed = False
+
+    font_size = parse_font_size(entry.get("size", ""))
+    if font_size is not None:
+        try:
+            font.Size = font_size
+            changed = True
+        except Exception:
+            pass
+
+    family = str(entry.get("family", "")).strip().strip("'\"")
+    if family:
+        try:
+            font.Name = family
+            changed = True
+        except Exception:
+            pass
+
+    style_value = str(entry.get("style", "")).strip().lower()
+    if style_value:
+        if "italic" in style_value or "oblique" in style_value:
+            try:
+                font.Italic = -1
+                changed = True
+            except Exception:
+                pass
+        elif style_value in {"normal", "regular"}:
+            try:
+                font.Italic = 0
+                changed = True
+            except Exception:
+                pass
+
+        if "bold" in style_value:
+            try:
+                font.Bold = -1
+                changed = True
+            except Exception:
+                pass
+
+    bold_value = parse_font_weight(entry.get("weight", ""))
+    if bold_value is not None:
+        try:
+            font.Bold = bold_value
+            changed = True
+        except Exception:
+            pass
+
+    return changed
 
 
 def vertical_overlap_ratio(a_bounds, b_bounds):
@@ -1034,12 +1149,13 @@ def process_with_python_pptx(
     columns_by_id,
     boxes_by_id,
     caption_entries,
+    text_blocks_by_id,
     caption_defaults,
     footer_text,
     location_text,
     slide_layout_rules,
 ):
-    del columns_by_id, boxes_by_id, caption_entries, caption_defaults, footer_text, location_text
+    del columns_by_id, boxes_by_id, caption_entries, text_blocks_by_id, caption_defaults, footer_text, location_text
 
     try:
         from pptx import Presentation  # type: ignore
@@ -1053,7 +1169,7 @@ def process_with_python_pptx(
     # Disclaimer:
     print("Warning: python-pptx backend has limited support, "
           "if your presentation relies on postprocessing features "
-          "(layout adjustments, captions, footer/location) it may not work as "
+          "(layout adjustments, captions, text blocks, footer/location) it may not work as "
           "expected. For best results, use the msoffice backend on Windows or "
           "post-process it manually.")
 
@@ -1171,7 +1287,7 @@ def process_with_python_pptx(
 
     print(f"Embedded {replaced} video(s).")
     if replaced >= 0:
-        print("Layout adjustments (columns/boxes/captions/footer) require the Windows msoffice backend.")
+        print("Layout adjustments (columns/boxes/captions/text blocks/footer) require the Windows msoffice backend.")
     return 0
 
 
@@ -1216,15 +1332,19 @@ def main():
     else:
         debug(f"mapping file not found: {mapping_path}")
 
-    layout = {"columns": [], "boxes": []}
+    layout = {"columns": [], "boxes": [], "text_blocks": []}
     if os.path.exists(layout_path):
         layout = load_layout(layout_path)
         debug(f"layout file: {layout_path}")
-        debug(f"layout columns: {len(layout.get('columns', []))} layout boxes: {len(layout.get('boxes', []))}")
+        debug(
+            f"layout columns: {len(layout.get('columns', []))} "
+            f"layout boxes: {len(layout.get('boxes', []))} "
+            f"layout text blocks: {len(layout.get('text_blocks', []))}"
+        )
     else:
         debug(f"layout file not found: {layout_path}")
 
-    columns_by_id, boxes_by_id, caption_entries = collect_layout(layout)
+    columns_by_id, boxes_by_id, caption_entries, text_blocks_by_id = collect_layout(layout)
     slide_layout_rules = collect_slide_layout_rules(layout.get("slide_layouts", []))
     footer_text = layout.get("footer", "")
     location_text = layout.get("location", "")
@@ -1242,6 +1362,7 @@ def main():
             columns_by_id=columns_by_id,
             boxes_by_id=boxes_by_id,
             caption_entries=caption_entries,
+            text_blocks_by_id=text_blocks_by_id,
             caption_defaults=caption_defaults,
             footer_text=footer_text,
             location_text=location_text,
@@ -1270,6 +1391,7 @@ def main():
     adjusted_columns = 0
     adjusted_boxes = 0
     adjusted_captions = 0
+    adjusted_text_blocks = 0
     missing = []
     try:
         try:
@@ -1548,6 +1670,37 @@ def main():
                         used_text_ids.add(shape_id)
                         adjusted_captions += 1
 
+            if text_blocks_by_id:
+                text_shapes = sorted(
+                    collect_text_shapes(slide),
+                    key=lambda s: (shape_bounds(s)[1], shape_bounds(s)[0]),
+                )
+                active_block_ids = []
+                applied_block_ids = set()
+
+                for shape in text_shapes:
+                    text_value = shape_text(shape)
+                    if not text_value:
+                        continue
+
+                    start_ids = extract_all_markers(text_value, TEXTBLOCK_PREFIX)
+                    for block_id in start_ids:
+                        if block_id and block_id not in active_block_ids:
+                            active_block_ids.append(block_id)
+
+                    for block_id in active_block_ids:
+                        entry = text_blocks_by_id.get(block_id)
+                        if entry is None:
+                            continue
+                        if apply_text_block_style(shape, entry):
+                            applied_block_ids.add(block_id)
+
+                    end_ids = set(extract_all_markers(text_value, TEXTBLOCK_END_PREFIX))
+                    if end_ids:
+                        active_block_ids = [block_id for block_id in active_block_ids if block_id not in end_ids]
+
+                adjusted_text_blocks += len(applied_block_ids)
+
             # Clean up any leftover caption markers from older runs.
             for shape in collect_text_shapes(slide):
                 try:
@@ -1572,6 +1725,21 @@ def main():
                 if LAYOUT_PREFIX not in current:
                     continue
                 cleaned = strip_layout_marker(current)
+                if cleaned != current:
+                    try:
+                        shape.TextFrame.TextRange.Text = cleaned
+                    except Exception:
+                        pass
+
+            # Clean up marker pairs used to style full div text blocks.
+            for shape in collect_text_shapes(slide):
+                try:
+                    current = shape.TextFrame.TextRange.Text or ""
+                except Exception:
+                    continue
+                if TEXTBLOCK_PREFIX not in current and TEXTBLOCK_END_PREFIX not in current:
+                    continue
+                cleaned = strip_text_block_markers(current)
                 if cleaned != current:
                     try:
                         shape.TextFrame.TextRange.Text = cleaned
@@ -1617,11 +1785,11 @@ def main():
         print("Warning: missing videos for placeholders:", ", ".join(unique_missing))
 
     print(f"Embedded {replaced} video(s).")
-    if adjusted_columns or adjusted_boxes or adjusted_captions:
+    if adjusted_columns or adjusted_boxes or adjusted_captions or adjusted_text_blocks:
         print(
             "Adjusted "
             f"{adjusted_columns} column(s), {adjusted_boxes} box(es), "
-            f"and {adjusted_captions} caption(s)."
+            f"{adjusted_captions} caption(s), and {adjusted_text_blocks} text block(s)."
         )
     return 0
 

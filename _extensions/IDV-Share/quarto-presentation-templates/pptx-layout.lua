@@ -1,11 +1,15 @@
 local columns = {}
 local boxes = {}
 local captions = {}
+local text_blocks = {}
 local column_counter = 0
 local box_counter = 0
 local caption_counter = 0
+local text_block_counter = 0
 local DEFAULT_COLUMNS_LAYOUT = "Two Content"
 local LAYOUT_PREFIX = "LAYOUT::"
+local TEXTBLOCK_PREFIX = "TEXTBLOCK::"
+local TEXTBLOCK_END_PREFIX = "TEXTBLOCKEND::"
 
 local function truthy(value)
   if value == nil then
@@ -176,6 +180,15 @@ local function append_marker(blocks, marker)
   table.insert(blocks, pandoc.Para({ pandoc.Str(marker) }))
 end
 
+local function clean_font_family(value)
+  if value == nil then
+    return ""
+  end
+  local text = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
+  text = text:gsub("^['\"]", ""):gsub("['\"]$", "")
+  return text
+end
+
 local function header_has_layout_marker(header)
   local text = pandoc.utils.stringify(header.content or {})
   return text:find(LAYOUT_PREFIX, 1, true) ~= nil
@@ -268,7 +281,78 @@ function Div(el)
     return el
   end
 
-  return nil
+  local style = el.attributes["style"] or ""
+  local styles = parse_style(style)
+  local font_size = get_attr_value(el.attributes, {
+    "font-size",
+    "text-size",
+    "pptx-font-size"
+  })
+  if font_size == "" then
+    font_size = styles["font-size"] or ""
+  end
+
+  local font_style = get_attr_value(el.attributes, {
+    "font-style",
+    "text-style",
+    "pptx-font-style"
+  })
+  if font_style == "" then
+    font_style = styles["font-style"] or ""
+  end
+
+  local font_weight = get_attr_value(el.attributes, {
+    "font-weight",
+    "text-weight",
+    "pptx-font-weight"
+  })
+  if font_weight == "" then
+    font_weight = styles["font-weight"] or ""
+  end
+
+  local font_family = get_attr_value(el.attributes, {
+    "font-family",
+    "font-name",
+    "font-type",
+    "typeface",
+    "pptx-font-family"
+  })
+  if font_family == "" then
+    font_family = styles["font-family"] or ""
+  end
+  font_family = clean_font_family(font_family)
+
+  if font_size == "" and font_style == "" and font_weight == "" and font_family == "" then
+    return nil
+  end
+
+  text_block_counter = text_block_counter + 1
+  local id = el.identifier
+  if id == nil or id == "" then
+    id = "textblock-" .. tostring(text_block_counter)
+  end
+
+  inject_marker(el.content, TEXTBLOCK_PREFIX .. id)
+  append_marker(el.content, TEXTBLOCK_END_PREFIX .. id)
+
+  table.insert(text_blocks, {
+    id = id,
+    size = font_size,
+    style = font_style,
+    weight = font_weight,
+    family = font_family
+  })
+
+  debug(
+    "text block id=" .. id
+      .. " size=" .. (font_size ~= "" and font_size or "<auto>")
+      .. " style=" .. (font_style ~= "" and font_style or "<auto>")
+      .. " weight=" .. (font_weight ~= "" and font_weight or "<auto>")
+      .. " family=" .. (font_family ~= "" and font_family or "<auto>")
+  )
+
+  return el
+
 end
 
 function Image(el)
@@ -374,7 +458,7 @@ function Pandoc(doc)
     end
   end
 
-  if #columns == 0 and #boxes == 0 and #captions == 0 and footer == "" and location == "" and caption_size == "" and caption_dx == "" and caption_dy == "" then
+  if #columns == 0 and #boxes == 0 and #captions == 0 and #text_blocks == 0 and footer == "" and location == "" and caption_size == "" and caption_dx == "" and caption_dy == "" then
     return doc
   end
 
@@ -387,6 +471,7 @@ function Pandoc(doc)
     columns = columns,
     boxes = boxes,
     captions = captions,
+    text_blocks = text_blocks,
     caption_defaults = {
       size = caption_size,
       dx = caption_dx,
