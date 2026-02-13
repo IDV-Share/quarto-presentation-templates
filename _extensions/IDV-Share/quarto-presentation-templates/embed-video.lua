@@ -1,5 +1,7 @@
 local placeholders = {}
 local counter = 0
+local POSTPROCESS_DISABLED = nil
+local VIDEO_PREFIX = "VIDEO::"
 
 local function truthy(value)
   if value == nil then
@@ -65,7 +67,72 @@ local function stringify_meta(meta_value)
   return pandoc.utils.stringify(meta_value)
 end
 
+local function get_meta_value_from(meta, key)
+  if type(meta) ~= "table" then
+    return ""
+  end
+
+  local value = stringify_meta(meta[key])
+  if value ~= "" then
+    return value
+  end
+
+  local format_meta = meta["format"]
+  if type(format_meta) == "table" then
+    local pptx_meta = format_meta["quarto-presentation-templates-pptx"] or format_meta["pptx"]
+    if type(pptx_meta) == "table" then
+      value = stringify_meta(pptx_meta[key])
+      if value ~= "" then
+        return value
+      end
+    end
+  end
+
+  return ""
+end
+
+local function postprocess_disabled_from_meta(meta)
+  local value = get_meta_value_from(meta, "disable-postprocess")
+  if value == "" then
+    value = get_meta_value_from(meta, "disable_postprocess")
+  end
+  return truthy(value)
+end
+
+local function postprocess_disabled_state()
+  if POSTPROCESS_DISABLED ~= nil then
+    return POSTPROCESS_DISABLED
+  end
+  if PANDOC_STATE == nil or PANDOC_STATE.meta == nil then
+    POSTPROCESS_DISABLED = false
+    return POSTPROCESS_DISABLED
+  end
+  POSTPROCESS_DISABLED = postprocess_disabled_from_meta(PANDOC_STATE.meta)
+  return POSTPROCESS_DISABLED
+end
+
+local function strip_video_markers(doc)
+  return doc:walk({
+    Str = function(el)
+      local text = el.text or ""
+      if text:sub(1, #VIDEO_PREFIX) == VIDEO_PREFIX then
+        return {}
+      end
+      return nil
+    end
+  })
+end
+
+function Meta(meta)
+  POSTPROCESS_DISABLED = postprocess_disabled_from_meta(meta)
+  return meta
+end
+
 function Div(el)
+  if postprocess_disabled_state() then
+    return nil
+  end
+
   if not has_class(el, "embed-video") then
     return nil
   end
@@ -100,7 +167,7 @@ function Div(el)
     debug("custom position x=" .. (pos_x ~= "" and pos_x or "<auto>") .. " y=" .. (pos_y ~= "" and pos_y or "<auto>"))
   end
 
-  local alt_text = "VIDEO::" .. id
+  local alt_text = VIDEO_PREFIX .. id
 
   local placeholder = nil
   if poster ~= "" then
@@ -131,6 +198,13 @@ function Div(el)
 end
 
 function Pandoc(doc)
+  local disabled = postprocess_disabled_from_meta(doc.meta)
+  POSTPROCESS_DISABLED = disabled
+  if disabled then
+    debug("postprocess disabled: embed-video placeholders skipped.")
+    return strip_video_markers(doc)
+  end
+
   if #placeholders == 0 then
     debug("no placeholders found.")
     return doc

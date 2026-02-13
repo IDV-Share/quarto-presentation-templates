@@ -13,6 +13,7 @@ format:
         toc-depth: 1
         fig-caption-size: 12pt
         fig-caption-dy: -10pt
+        disable-postprocess: true # set this to true to disable postprocess features (allows quarto builds with no artifacts)
 ---
 
 <!-- Title Slide is inserted automatically -->

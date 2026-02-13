@@ -26,6 +26,18 @@ This whole block is bold and uses Arial.
 :::
 ```
 
+## Disable Postprocess
+
+To render with plain Quarto only (no postprocess markers/placeholders), set:
+
+```yaml
+format:
+  quarto-presentation-templates-pptx:
+    disable-postprocess: true
+```
+
+This disables marker injection in Lua filters (`pptx-layout.lua`, `embed-video.lua`).
+
 
 ## For Developers
 

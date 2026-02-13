@@ -10,6 +10,16 @@ local DEFAULT_COLUMNS_LAYOUT = "Two Content"
 local LAYOUT_PREFIX = "LAYOUT::"
 local TEXTBLOCK_PREFIX = "TEXTBLOCK::"
 local TEXTBLOCK_END_PREFIX = "TEXTBLOCKEND::"
+local POSTPROCESS_DISABLED = nil
+local MARKER_PREFIXES = {
+  "COLUMN::",
+  "BOX::",
+  "BOXEND::",
+  "CAPTION::",
+  "LAYOUT::",
+  TEXTBLOCK_PREFIX,
+  TEXTBLOCK_END_PREFIX
+}
 
 local function truthy(value)
   if value == nil then
@@ -62,13 +72,17 @@ local function stringify_meta(meta_value)
   return pandoc.utils.stringify(meta_value)
 end
 
-local function get_meta_value(doc, key)
-  local value = stringify_meta(doc.meta[key])
+local function get_meta_value_from(meta, key)
+  if type(meta) ~= "table" then
+    return ""
+  end
+
+  local value = stringify_meta(meta[key])
   if value ~= "" then
     return value
   end
 
-  local format_meta = doc.meta["format"]
+  local format_meta = meta["format"]
   if type(format_meta) == "table" then
     local pptx_meta = format_meta["quarto-presentation-templates-pptx"] or format_meta["pptx"]
     if type(pptx_meta) == "table" then
@@ -80,6 +94,59 @@ local function get_meta_value(doc, key)
   end
 
   return ""
+end
+
+local function get_meta_value(doc, key)
+  return get_meta_value_from(doc.meta, key)
+end
+
+local function postprocess_disabled_from_meta(meta)
+  local value = get_meta_value_from(meta, "disable-postprocess")
+  if value == "" then
+    value = get_meta_value_from(meta, "disable_postprocess")
+  end
+  return truthy(value)
+end
+
+local function postprocess_disabled_state()
+  if POSTPROCESS_DISABLED ~= nil then
+    return POSTPROCESS_DISABLED
+  end
+  if PANDOC_STATE == nil or PANDOC_STATE.meta == nil then
+    POSTPROCESS_DISABLED = false
+    return POSTPROCESS_DISABLED
+  end
+  POSTPROCESS_DISABLED = postprocess_disabled_from_meta(PANDOC_STATE.meta)
+  return POSTPROCESS_DISABLED
+end
+
+local function starts_with(text, prefix)
+  return text ~= nil and prefix ~= nil and text:sub(1, #prefix) == prefix
+end
+
+local function is_marker_token(text)
+  for _, prefix in ipairs(MARKER_PREFIXES) do
+    if starts_with(text, prefix) then
+      return true
+    end
+  end
+  return false
+end
+
+local function strip_marker_tokens(doc)
+  return doc:walk({
+    Str = function(el)
+      if is_marker_token(el.text or "") then
+        return {}
+      end
+      return nil
+    end
+  })
+end
+
+function Meta(meta)
+  POSTPROCESS_DISABLED = postprocess_disabled_from_meta(meta)
+  return meta
 end
 
 local function get_slide_level()
@@ -219,6 +286,10 @@ local function inject_layout_marker_into_header(header, layout_name)
 end
 
 function Div(el)
+  if postprocess_disabled_state() then
+    return nil
+  end
+
   if has_class(el, "column") then
     column_counter = column_counter + 1
     local id = el.identifier
@@ -356,6 +427,10 @@ function Div(el)
 end
 
 function Image(el)
+  if postprocess_disabled_state() then
+    return nil
+  end
+
   if el.caption == nil then
     return nil
   end
@@ -410,6 +485,13 @@ function Image(el)
 end
 
 function Pandoc(doc)
+  local disabled = postprocess_disabled_from_meta(doc.meta)
+  POSTPROCESS_DISABLED = disabled
+  if disabled then
+    debug("postprocess disabled: layout and marker injection skipped.")
+    return strip_marker_tokens(doc)
+  end
+
   local footer = get_meta_value(doc, "footer")
   local location = get_meta_value(doc, "location")
   local caption_size = get_meta_value(doc, "fig-caption-size")
