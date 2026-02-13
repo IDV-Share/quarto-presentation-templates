@@ -6,7 +6,6 @@ local column_counter = 0
 local box_counter = 0
 local caption_counter = 0
 local text_block_counter = 0
-local DEFAULT_COLUMNS_LAYOUT = "Two Content"
 local LAYOUT_PREFIX = "LAYOUT::"
 local TEXTBLOCK_PREFIX = "TEXTBLOCK::"
 local TEXTBLOCK_END_PREFIX = "TEXTBLOCKEND::"
@@ -694,33 +693,9 @@ function Pandoc(doc)
   local caption_dx = get_meta_value(doc, "fig-caption-dx")
   local caption_dy = get_meta_value(doc, "fig-caption-dy")
 
-  local columns_layout = get_meta_value(doc, "columns-layout")
-  if columns_layout == "" then
-    columns_layout = DEFAULT_COLUMNS_LAYOUT
-  end
-
-  -- Force "Two Content" layout when columns are used, unless user specified one.
+  -- Force layout.
   local slide_level = get_slide_level()
   local current_header = nil
-  local has_columns = false
-  for _, block in ipairs(doc.blocks) do
-    if block.t == "Header" and block.level == slide_level then
-      if current_header ~= nil and has_columns then
-        if current_header.attributes["layout"] == nil and current_header.attributes["data-layout"] == nil then
-          current_header.attributes["data-layout"] = columns_layout
-        end
-      end
-      current_header = block
-      has_columns = false
-    elseif block.t == "Div" and has_class(block, "columns") then
-      has_columns = true
-    end
-  end
-  if current_header ~= nil and has_columns then
-    if current_header.attributes["layout"] == nil and current_header.attributes["data-layout"] == nil then
-      current_header.attributes["data-layout"] = columns_layout
-    end
-  end
 
   -- Add explicit layout markers from header attributes so postprocess.py can
   -- force master layouts in PowerPoint even when pandoc/quarto cannot.

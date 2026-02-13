@@ -93,7 +93,7 @@ This slide contains both text and an image.
 
 ---
 
-<!-- ## Figure caption styling
+## Figure caption styling
 
 :::: {.columns}
 ::: {.column style="width: 40%; vertical-align: top;"}
@@ -102,7 +102,7 @@ This slide contains both text and an image.
 ::: {.column style="width: 60%; vertical-align: bottom;"}
 ![Custom caption size + offset](resources/media/superav_home.jpg){cap-size="10pt" cap-dy="0.15in"}
 :::
-:::: -->
+::::
 
 ---
 
@@ -203,9 +203,9 @@ $$
 
 ---
 
-## Mermaid diagrams
+## Mermaid diagrams {layout="Title and Content"}
 
-<!-- FIXME: wron slide format selected by pandoc -->
+<!-- FIXME: wrong slide format selected by pandoc -->
 ```{mermaid}
 %%| fig-width: 40%
 flowchart LR
@@ -271,7 +271,6 @@ plt.show()
 ```
 :::
 
-<!--- FIXME: vertical align is not supported in PowerPoint output --->
 ::: {.column}
 
 ```{python}
