@@ -1157,11 +1157,9 @@ def main():
     )
     args = parser.parse_args()
 
-    debug_enabled = args.debug or truthy(os.getenv("EMBED_VIDEO_DEBUG", ""))
-
     def debug(msg):
-        if debug_enabled:
-            print(f"[embed-video] {msg}", file=sys.stderr)
+        if debug is not None:
+            print(f"[postprocess] {msg}", file=sys.stderr)
 
     input_path = os.path.abspath(args.input)
     mapping_path = os.path.abspath(args.mapping)

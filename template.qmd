@@ -30,7 +30,7 @@ format:
 
 ---
 
-## My custom layout slide {layout="2_Title and Content"}
+## My custom layout slide {layout="1_Title and Content"}
 
 - This slide explicitly requests the `Title and Content` master layout.
 - Replace `Title and Content` with the exact layout name from your `.pptx` template.
