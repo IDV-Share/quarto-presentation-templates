@@ -11,6 +11,9 @@ format:
         slide-number: c/t # not supported in PowerPoint output
         toc: true
         toc-depth: 1
+        fig-caption-size: 12pt
+        fig-caption-dy: -10pt
+        disable-postprocess: false # set this to true to disable postprocess features (allows quarto builds with no artifacts)
 ---
 
 <!-- Title Slide is inserted automatically -->
@@ -25,6 +28,16 @@ format:
 
 - **Bold text** and *italic text*.
 - A list of supported pptx options can be found in the [Quarto documentation](https://quarto.org/docs/reference/formats/presentations/pptx.html).
+
+---
+
+## My custom layout slide {layout="1_Title and Content"}
+
+- This slide explicitly requests the `Title and Content` master layout.
+- Replace `Title and Content` with the exact layout name from your `.pptx` template.
+- This is applied by `postprocess.py` (Windows `msoffice` backend).
+- You can still use `\LAYOUT::...` markers, but header attributes are preferred.
+- To write marker keywords as plain text, escape the prefix: `\\LAYOUT::...` (same for `\\COLUMN::`, `\\BOX::`, `\\CAPTION::`, `\\VIDEO::`, ...).
 
 ---
 
@@ -52,6 +65,16 @@ format:
 
 ---
 
+## Styled div block
+
+::: {style="font-size:14pt; font-weight:bold; font-family:Arial;"}
+- This whole `:::` block is styled by `postprocess.py`.
+- Supported attributes: `font-size`, `font-style`, `font-weight`, `font-family` (or via `style="..."`).
+- Useful when Quarto/Pandoc cannot force these properties directly in PPTX.
+:::
+
+---
+
 ## Custom color filter
 
 This is [red text]{style="color:#FF0000;"}.
@@ -68,6 +91,20 @@ This slide contains both text and an image.
 
 ![Example Image](resources/media/viking-hero.jpg)
 
+---
+
+## Figure caption styling
+
+:::: {.columns}
+::: {.column style="width: 40%; vertical-align: top;"}
+![Default caption size (from metadata)](resources/media/viking-hero.jpg)
+:::
+::: {.column style="width: 60%; vertical-align: bottom;"}
+![Custom caption size + offset](resources/media/superav_home.jpg){cap-size="10pt" cap-dy="0.15in"}
+:::
+::::
+
+---
 
 <!-- SECTION  HEADER SLIDE-->
 
@@ -108,18 +145,27 @@ This slide contains both text and an image.
 ## Two-column layout
 
 :::: {.columns}
-
-<!--- FIXME: column width is not working in PowerPoint output --->
-::: {.column  style="width: 40%;"}
+::: {.column style="width: 40%; vertical-align: top;"}
 Column 1.
+Widht 40% of the slide.
+Aligned to the top.
 :::
-
-<!--- FIXME: column width is not working in PowerPoint output --->
-::: {.column style="width: 60%;"}
+::: {.column style="width: 60%; vertical-align: bottom;"}
 Column 2.
+Widht 60% of the slide.
+Aligned to the bottom.
 :::
-
 ::::
+
+---
+
+## Custom text box
+
+This slide hase some content and some custom text boxes.
+
+::: {.pptx-box width="10cm" height="2in" x="20%" y="200pt" style="vertical-align: middle;"}
+This text is placed inside a custom box.
+:::
 
 ---
 
@@ -157,9 +203,9 @@ $$
 
 ---
 
-## Mermaid diagrams
+## Mermaid diagrams {layout="Title and Content"}
 
-<!-- FIXME: wron slide format selected by pandoc -->
+<!-- FIXME: wrong slide format selected by pandoc -->
 ```{mermaid}
 %%| fig-width: 40%
 flowchart LR
@@ -202,14 +248,14 @@ plt.show()
 
 ---
 
-## Slide with executed python code
-
 ```{python}
 #| tags: [parameters]
 
 alpha = 0.1
 ratio = 0.1
 ```
+
+## Slide with executed python code
 
 :::: {.columns}
 
@@ -225,8 +271,7 @@ plt.show()
 ```
 :::
 
-<!--- FIXME: vertical align is not supported in PowerPoint output --->
-::: {.column style="vertical-align: top;"}
+::: {.column}
 
 ```{python}
 #| label: fig-example
@@ -277,10 +322,26 @@ plt.tight_layout()
 plt.show()
 ```
 
-# Citations
+## Citations
 This is a citation [@idv].
 
 This is also a citation @idv.
+
+---
+
+## Embed Video
+
+::: {.embed-video #video-intro poster="resources/media/tank_tracks_on_the_ground_sky_reflecting.jpg" video="resources/media/sample.wmv" width="80%" x="0%"}
+![](resources/media/tank_tracks_on_the_ground_sky_reflecting.jpg)
+:::
+
+---
+
+## Embed Video (URL + size)
+<!-- To include youtube videos use the iframe URL for embedding -->
+::: {.embed-video #video-url poster="resources/media/tank_tracks_on_the_ground_sky_reflecting.jpg" video="https://www.youtube.com/embed/_Sl8diqCAFw?list=PL4Gr5tOAPttJ247vzkv1ZbUEm_YtKLejH&t=1" width="80%" height="80%"}
+![](resources/media/tank_tracks_on_the_ground_sky_reflecting.jpg)
+:::
 
 ## References
 

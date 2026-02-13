@@ -30,3 +30,8 @@ Or you can use as a starting template for your presentation:
 ```bash
 quarto use template IDV-Share/quarto-presentation-templates
 ```
+
+### Disable Postprocess (PPTX)
+
+Set `disable-postprocess: true` in your document metadata to skip marker-based postprocessing and render with plain Quarto only.
+`make pptx` also detects this flag and skips `postprocess.py` automatically.

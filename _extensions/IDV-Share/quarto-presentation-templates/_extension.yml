@@ -6,6 +6,7 @@
 #
 #  Quarto Presentation Templates for PowerPoint Presentations
 #  author: matteo larcher (matteo.larcher@idvgroup.com)
+#  note: this extension is coded with the help of AI tools
 
 title: "IDV PowerPoint Template"
 author: Matteo Larcher
@@ -22,3 +23,5 @@ contributes:
         - custom-font-size.lua
         - emphasis-colors.lua
         - custom-color.lua
+        - pptx-layout.lua
+        - embed-video.lua

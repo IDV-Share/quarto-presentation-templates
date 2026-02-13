@@ -9,6 +9,34 @@ to enforce consistent branding.
 - Master slide layouts
 - Logo placement
 - Compatible with Quarto PPTX output
+- Postprocess styling for full `:::` text blocks (`font-size`, `font-style`, `font-weight`, `font-family`)
+
+## Full Div Text Styling
+
+Style an entire div block in PPTX with attributes or CSS-style values.
+These settings are applied by `postprocess.py` (Windows `msoffice` backend).
+
+```markdown
+::: {font-size="18pt" font-style="italic" font-family="Calibri"}
+This whole block is styled in PowerPoint.
+:::
+
+::: {style="font-size:14pt; font-weight:bold; font-family:Arial;"}
+This whole block is bold and uses Arial.
+:::
+```
+
+## Disable Postprocess
+
+To render with plain Quarto only (no postprocess markers/placeholders), set:
+
+```yaml
+format:
+  quarto-presentation-templates-pptx:
+    disable-postprocess: true
+```
+
+This disables marker injection in Lua filters (`pptx-layout.lua`, `embed-video.lua`).
 
 
 ## For Developers
