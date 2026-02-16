@@ -67,11 +67,26 @@ format:
 
 ## Styled div block
 
-::: {style="font-size:14pt; font-weight:bold; font-family:Arial;"}
-- This whole `:::` block is styled by `postprocess.py`.
+This line is not formatted by the div style.
+
+:::{style="font-size:12pt; font-weight:bold; font-family:Arial;"}
+- This content inside `:::` is styled by `postprocess.py`.
 - Supported attributes: `font-size`, `font-style`, `font-weight`, `font-family` (or via `style="..."`).
 - Useful when Quarto/Pandoc cannot force these properties directly in PPTX.
+- Nested bullet level 1
+  - Nested bullet level 2
 :::
+
+This line is outside the div and keeps the default slide formatting.
+
+:::{.Large}
+This whole fenced block uses the `Large` class preset.
+:::
+
+:::{style="font-size:12pt; font-weight:bold; font-family:Arial;"}
+Styled paragraph (no bullets) with inline style attributes.
+:::
+
 
 ---
 

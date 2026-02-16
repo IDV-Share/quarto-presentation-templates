@@ -15,6 +15,11 @@ to enforce consistent branding.
 
 Style an entire div block in PPTX with attributes or CSS-style values.
 These settings are applied by `postprocess.py` (Windows `msoffice` backend).
+Styling is scoped to text inside the fenced block only.
+Bullet lists and nested lists inside the fenced block are supported.
+
+Named size classes are handled directly by `pptx-layout.lua` and are supported on fenced divs:
+`.LARGE`, `.Large`, `.large`, `.normal`, `.small`, `.Small`, `.SMALL`, `.tiny`, `.Tiny`, `.TINY`.
 
 ```markdown
 ::: {font-size="18pt" font-style="italic" font-family="Calibri"}
@@ -23,6 +28,10 @@ This whole block is styled in PowerPoint.
 
 ::: {style="font-size:14pt; font-weight:bold; font-family:Arial;"}
 This whole block is bold and uses Arial.
+:::
+
+:::{.Large}
+This whole fenced block uses the `Large` size preset.
 :::
 ```
 

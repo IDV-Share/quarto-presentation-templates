@@ -21,6 +21,9 @@ CAPTION_PREFIX = "CAPTION::"
 TEXTBLOCK_PREFIX = "TEXTBLOCK::"
 TEXTBLOCK_END_PREFIX = "TEXTBLOCKEND::"
 LAYOUT_PREFIX = "LAYOUT::"
+TEXTBLOCK_MARKER_PATTERN = re.compile(
+    r"(?<!\\)(" + re.escape(TEXTBLOCK_PREFIX) + r"|" + re.escape(TEXTBLOCK_END_PREFIX) + r")([^\s]+)"
+)
 ESCAPABLE_MARKER_PREFIXES = (
     PLACEHOLDER_PREFIX,
     COLUMN_PREFIX,
@@ -566,6 +569,81 @@ def strip_text_block_markers(text):
     return cleaned.strip(" \r\n\t")
 
 
+def extract_text_block_marker_events(text):
+    if not text:
+        return []
+
+    events = []
+    for match in TEXTBLOCK_MARKER_PATTERN.finditer(text):
+        marker_prefix = match.group(1)
+        marker_id = match.group(2)
+        if not marker_id:
+            continue
+        events.append(
+            {
+                "id": marker_id,
+                "is_start": marker_prefix == TEXTBLOCK_PREFIX,
+                "start": match.start(),
+                "end": match.end(),
+            }
+        )
+    return events
+
+
+def split_text_block_segments(text, active_block_ids):
+    events = extract_text_block_marker_events(text)
+    active_ids = list(active_block_ids or [])
+    segments_by_id = {}
+    cursor = 0
+
+    def add_segment(start, end):
+        if end <= start:
+            return
+        if not active_ids:
+            return
+        length = end - start
+        for block_id in active_ids:
+            segments_by_id.setdefault(block_id, []).append((start, length))
+
+    for event in events:
+        add_segment(cursor, event["start"])
+        block_id = event["id"]
+        if event["is_start"]:
+            if block_id not in active_ids:
+                active_ids.append(block_id)
+        else:
+            active_ids = [active_id for active_id in active_ids if active_id != block_id]
+        cursor = event["end"]
+
+    add_segment(cursor, len(text))
+    return segments_by_id, active_ids, events
+
+
+def iter_non_break_subranges(text, start, length):
+    if not text or length <= 0:
+        return
+    end = start + length
+    if start < 0:
+        start = 0
+    if end > len(text):
+        end = len(text)
+    if end <= start:
+        return
+
+    idx = start
+    while idx < end:
+        while idx < end and text[idx] in {"\r", "\n"}:
+            idx += 1
+        if idx >= end:
+            break
+        seg_start = idx
+        while idx < end and text[idx] not in {"\r", "\n"}:
+            idx += 1
+        seg_len = idx - seg_start
+        if seg_len > 0:
+            yield seg_start, seg_len
+
+
 def strip_column_box_markers(text):
     if not text:
         return text
@@ -844,19 +922,18 @@ def parse_font_weight(value):
     return -1 if numeric >= 600 else 0
 
 
-def apply_text_block_style(shape, entry):
+def apply_text_block_style(text_range, start, length, entry):
     if not isinstance(entry, dict):
         return False
-
-    try:
-        if not shape.HasTextFrame or not shape.TextFrame.HasText:
-            return False
-    except Exception:
+    if length <= 0:
         return False
 
+    if text_range is None:
+        return False
+
+    range_start = start + 1  # COM TextRange is 1-based.
     try:
-        text_range = shape.TextFrame.TextRange
-        font = text_range.Font
+        font = text_range.Characters(range_start, length).Font
     except Exception:
         return False
 
@@ -909,6 +986,95 @@ def apply_text_block_style(shape, entry):
             pass
 
     return changed
+
+
+def apply_text_block_styles_in_shape(shape, text_blocks_by_id, active_block_ids):
+    try:
+        if not shape.HasTextFrame or not shape.TextFrame.HasText:
+            return list(active_block_ids or []), set()
+    except Exception:
+        return list(active_block_ids or []), set()
+
+    try:
+        text_range = shape.TextFrame.TextRange
+        text_value = text_range.Text or ""
+    except Exception:
+        return list(active_block_ids or []), set()
+
+    if not text_value:
+        return list(active_block_ids or []), set()
+
+    segments_by_id, next_active_ids, _ = split_text_block_segments(text_value, active_block_ids)
+    applied_block_ids = set()
+
+    for block_id, segments in segments_by_id.items():
+        entry = text_blocks_by_id.get(block_id)
+        if not isinstance(entry, dict):
+            continue
+        block_changed = False
+        for start, length in segments:
+            for sub_start, sub_length in iter_non_break_subranges(text_value, start, length):
+                if apply_text_block_style(text_range, sub_start, sub_length, entry):
+                    block_changed = True
+        if block_changed:
+            applied_block_ids.add(block_id)
+
+    return next_active_ids, applied_block_ids
+
+
+def remove_text_block_markers(shape):
+    try:
+        if not shape.HasTextFrame or not shape.TextFrame.HasText:
+            return False
+    except Exception:
+        return False
+
+    try:
+        text_range = shape.TextFrame.TextRange
+        text_value = text_range.Text or ""
+    except Exception:
+        return False
+
+    if not text_value:
+        return False
+
+    events = extract_text_block_marker_events(text_value)
+    if not events:
+        return False
+
+    removed = False
+    for event in reversed(events):
+        start = event["start"]
+        end = event["end"]
+        # Markers are injected with a synthetic space: after start markers,
+        # before end markers. Remove that spacer as well.
+        if event["is_start"]:
+            if end < len(text_value) and text_value[end] == " ":
+                end += 1
+        else:
+            if start > 0 and text_value[start - 1] == " ":
+                start -= 1
+
+        marker_length = end - start
+        if marker_length <= 0:
+            continue
+        try:
+            text_range.Characters(start + 1, marker_length).Delete()
+            removed = True
+        except Exception:
+            continue
+
+    if removed:
+        return True
+
+    cleaned = strip_text_block_markers(text_value)
+    if cleaned != text_value:
+        try:
+            text_range.Text = cleaned
+            return True
+        except Exception:
+            return False
+    return False
 
 
 def vertical_overlap_ratio(a_bounds, b_bounds):
@@ -1807,25 +1973,11 @@ def main():
                 applied_block_ids = set()
 
                 for shape in text_shapes:
-                    text_value = shape_text(shape)
-                    if not text_value:
-                        continue
-
-                    start_ids = extract_all_markers(text_value, TEXTBLOCK_PREFIX)
-                    for block_id in start_ids:
-                        if block_id and block_id not in active_block_ids:
-                            active_block_ids.append(block_id)
-
-                    for block_id in active_block_ids:
-                        entry = text_blocks_by_id.get(block_id)
-                        if entry is None:
-                            continue
-                        if apply_text_block_style(shape, entry):
-                            applied_block_ids.add(block_id)
-
-                    end_ids = set(extract_all_markers(text_value, TEXTBLOCK_END_PREFIX))
-                    if end_ids:
-                        active_block_ids = [block_id for block_id in active_block_ids if block_id not in end_ids]
+                    active_block_ids, changed_ids = apply_text_block_styles_in_shape(
+                        shape, text_blocks_by_id, active_block_ids
+                    )
+                    if changed_ids:
+                        applied_block_ids.update(changed_ids)
 
                 adjusted_text_blocks += len(applied_block_ids)
 
@@ -1880,18 +2032,7 @@ def main():
 
             # Clean up marker pairs used to style full div text blocks.
             for shape in collect_text_shapes(slide):
-                try:
-                    current = shape.TextFrame.TextRange.Text or ""
-                except Exception:
-                    continue
-                if TEXTBLOCK_PREFIX not in current and TEXTBLOCK_END_PREFIX not in current:
-                    continue
-                cleaned = strip_text_block_markers(current)
-                if cleaned != current:
-                    try:
-                        shape.TextFrame.TextRange.Text = cleaned
-                    except Exception:
-                        pass
+                remove_text_block_markers(shape)
 
             # Allow writing marker keywords literally with escaped prefixes.
             for shape in collect_text_shapes(slide):

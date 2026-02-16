@@ -288,34 +288,102 @@ local function parse_style(style)
   if style == nil or style == "" then
     return styles
   end
-  for key, value in string.gmatch(style, "([%w-]+)%s*:%s*([^;]+)") do
-    styles[string.lower(key)] = (value:gsub("^%s+", ""):gsub("%s+$", ""))
+
+  -- Robust CSS declaration parsing (handles spacing/newlines consistently).
+  for decl in string.gmatch(tostring(style), "([^;]+)") do
+    local key, value = string.match(decl, "^%s*([^:]+)%s*:%s*(.-)%s*$")
+    if key ~= nil and value ~= nil and key ~= "" and value ~= "" then
+      styles[string.lower(key)] = value
+    end
   end
   return styles
 end
 
-local function inject_marker(blocks, marker)
+local function inject_marker_into_blocks(blocks, marker)
+  if blocks == nil then
+    return false
+  end
+
   for _, block in ipairs(blocks) do
     if block.t == "Para" or block.t == "Plain" then
       table.insert(block.content, 1, pandoc.Space())
       table.insert(block.content, 1, pandoc.Str(marker))
-      return
+      return true
+    elseif block.t == "Div" or block.t == "BlockQuote" then
+      if inject_marker_into_blocks(block.content, marker) then
+        return true
+      end
+    elseif block.t == "BulletList" or block.t == "OrderedList" then
+      for _, item in ipairs(block.content or {}) do
+        if inject_marker_into_blocks(item, marker) then
+          return true
+        end
+      end
+    elseif block.t == "DefinitionList" then
+      for _, item in ipairs(block.content or {}) do
+        local defs = item[2] or {}
+        for _, def_blocks in ipairs(defs) do
+          if inject_marker_into_blocks(def_blocks, marker) then
+            return true
+          end
+        end
+      end
     end
   end
 
-  table.insert(blocks, 1, pandoc.Para({ pandoc.Str(marker) }))
+  return false
 end
 
-local function append_marker(blocks, marker)
+local function append_marker_into_blocks(blocks, marker)
+  if blocks == nil then
+    return false
+  end
+
   for i = #blocks, 1, -1 do
     local block = blocks[i]
     if block.t == "Para" or block.t == "Plain" then
       table.insert(block.content, pandoc.Space())
       table.insert(block.content, pandoc.Str(marker))
-      return
+      return true
+    elseif block.t == "Div" or block.t == "BlockQuote" then
+      if append_marker_into_blocks(block.content, marker) then
+        return true
+      end
+    elseif block.t == "BulletList" or block.t == "OrderedList" then
+      local items = block.content or {}
+      for j = #items, 1, -1 do
+        if append_marker_into_blocks(items[j], marker) then
+          return true
+        end
+      end
+    elseif block.t == "DefinitionList" then
+      local defs_list = block.content or {}
+      for j = #defs_list, 1, -1 do
+        local item = defs_list[j]
+        local defs = item[2] or {}
+        for k = #defs, 1, -1 do
+          if append_marker_into_blocks(defs[k], marker) then
+            return true
+          end
+        end
+      end
     end
   end
 
+  return false
+end
+
+local function inject_marker(blocks, marker)
+  if inject_marker_into_blocks(blocks, marker) then
+    return
+  end
+  table.insert(blocks, 1, pandoc.Para({ pandoc.Str(marker) }))
+end
+
+local function append_marker(blocks, marker)
+  if append_marker_into_blocks(blocks, marker) then
+    return
+  end
   table.insert(blocks, pandoc.Para({ pandoc.Str(marker) }))
 end
 
@@ -338,6 +406,85 @@ local function clean_font_family(value)
   local text = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
   text = text:gsub("^['\"]", ""):gsub("['\"]$", "")
   return text
+end
+
+local CLASS_FONT_SIZES_PT = {
+  LARGE = 28,
+  Large = 24,
+  large = 22,
+  normal = 20,
+  small = 18,
+  Small = 16,
+  SMALL = 14,
+  tiny = 12,
+  Tiny = 10,
+  TINY = 8
+}
+
+local function is_pptx()
+  return FORMAT:match("pptx")
+end
+
+local function class_font_size_pt_from_classes(classes)
+  if classes == nil then
+    return nil
+  end
+  for _, class in ipairs(classes) do
+    local mapped = CLASS_FONT_SIZES_PT[class]
+    if mapped ~= nil then
+      return mapped
+    end
+  end
+  return nil
+end
+
+local function class_font_size_from_classes(classes)
+  local size_pt = class_font_size_pt_from_classes(classes)
+  if size_pt == nil then
+    return ""
+  end
+  return tostring(size_pt) .. "pt"
+end
+
+local function xml_escape(text)
+  if text == nil then
+    return ""
+  end
+  local escaped = tostring(text)
+  escaped = escaped:gsub("&", "&amp;")
+  escaped = escaped:gsub("<", "&lt;")
+  escaped = escaped:gsub(">", "&gt;")
+  escaped = escaped:gsub("\"", "&quot;")
+  escaped = escaped:gsub("'", "&apos;")
+  return escaped
+end
+
+function Span(el)
+  if not is_pptx() then
+    return nil
+  end
+  local size_pt = class_font_size_pt_from_classes(el.classes)
+  if size_pt == nil then
+    return nil
+  end
+  local text = pandoc.utils.stringify(el.content)
+  if text == nil or text == "" then
+    return nil
+  end
+  local xml = string.format(
+    '<a:r><a:rPr sz="%d"/><a:t>%s</a:t></a:r>',
+    math.floor(size_pt * 100),
+    xml_escape(text)
+  )
+  return pandoc.RawInline("openxml", xml)
+end
+
+local function font_size_from_classes(classes)
+  local size = class_font_size_from_classes(classes)
+  if size ~= "" then
+    return size
+  end
+  return ""
 end
 
 local function header_has_layout_marker(header)
@@ -450,6 +597,9 @@ function Div(el)
   if font_size == "" then
     font_size = styles["font-size"] or ""
   end
+  if font_size == "" then
+    font_size = font_size_from_classes(el.classes)
+  end
 
   local font_style = get_attr_value(el.attributes, {
     "font-style",
@@ -480,6 +630,15 @@ function Div(el)
     font_family = styles["font-family"] or ""
   end
   font_family = clean_font_family(font_family)
+
+  if style ~= "" then
+    debug(
+      "div style parsed: size=" .. (font_size ~= "" and font_size or "<auto>")
+        .. " style=" .. (font_style ~= "" and font_style or "<auto>")
+        .. " weight=" .. (font_weight ~= "" and font_weight or "<auto>")
+        .. " family=" .. (font_family ~= "" and font_family or "<auto>")
+    )
+  end
 
   if font_size == "" and font_style == "" and font_weight == "" and font_family == "" then
     return nil
