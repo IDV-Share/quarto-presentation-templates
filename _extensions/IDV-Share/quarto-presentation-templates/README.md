@@ -7,9 +7,24 @@ to enforce consistent branding.
 
 - Corporate fonts and colors
 - Master slide layouts
+- Header-level hidden-slide flag (`{hidden=true}` / `{hide=true}`)
 - Logo placement
 - Compatible with Quarto PPTX output
 - Postprocess styling for full `:::` text blocks (`font-size`, `font-style`, `font-weight`, `font-family`)
+
+## Hidden Slides
+
+Mark a slide as hidden in the final PowerPoint slideshow using a header attribute:
+
+```markdown
+## Internal Backup Slide {hidden=true}
+```
+
+Alias:
+
+```markdown
+## Internal Backup Slide {hide=true}
+```
 
 ## Full Div Text Styling
 

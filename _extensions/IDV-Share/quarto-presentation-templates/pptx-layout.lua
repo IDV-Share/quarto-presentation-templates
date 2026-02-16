@@ -7,6 +7,7 @@ local box_counter = 0
 local caption_counter = 0
 local text_block_counter = 0
 local LAYOUT_PREFIX = "LAYOUT::"
+local HIDE_PREFIX = "HIDE::"
 local TEXTBLOCK_PREFIX = "TEXTBLOCK::"
 local TEXTBLOCK_END_PREFIX = "TEXTBLOCKEND::"
 local POSTPROCESS_DISABLED = nil
@@ -16,6 +17,7 @@ local MARKER_PREFIXES = {
   "BOXEND::",
   "CAPTION::",
   "LAYOUT::",
+  HIDE_PREFIX,
   TEXTBLOCK_PREFIX,
   TEXTBLOCK_END_PREFIX
 }
@@ -492,6 +494,11 @@ local function header_has_layout_marker(header)
   return text:find(LAYOUT_PREFIX, 1, true) ~= nil
 end
 
+local function header_has_hide_marker(header)
+  local text = pandoc.utils.stringify(header.content or {})
+  return text:find(HIDE_PREFIX, 1, true) ~= nil
+end
+
 local function inject_layout_marker_into_header(header, layout_name)
   if header == nil or layout_name == nil or layout_name == "" then
     return
@@ -514,6 +521,17 @@ local function inject_layout_marker_into_header(header, layout_name)
     table.insert(header.content, pandoc.Space())
     table.insert(header.content, pandoc.Str(parts[i]))
   end
+end
+
+local function inject_hide_marker_into_header(header)
+  if header == nil then
+    return
+  end
+  if header_has_hide_marker(header) then
+    return
+  end
+  table.insert(header.content, pandoc.Space())
+  table.insert(header.content, pandoc.Str(HIDE_PREFIX .. "1"))
 end
 
 function Div(el)
@@ -863,6 +881,19 @@ function Pandoc(doc)
       local layout_name = get_attr_value(block.attributes, { "layout", "data-layout" })
       if layout_name ~= "" then
         inject_layout_marker_into_header(block, layout_name)
+      end
+
+      local hide_value = get_attr_value(block.attributes, {
+        "hidden",
+        "hide",
+        "slide-hidden",
+        "slide-hide",
+        "data-hidden",
+        "data-hide"
+      })
+      if hide_value ~= "" and truthy(hide_value) then
+        inject_hide_marker_into_header(block)
+        debug("slide hide marker injected from header attribute")
       end
     end
   end

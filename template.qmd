@@ -39,6 +39,11 @@ format:
 - You can still use `\LAYOUT::...` markers, but header attributes are preferred.
 - To write marker keywords as plain text, escape the prefix: `\\LAYOUT::...` (same for `\\COLUMN::`, `\\BOX::`, `\\CAPTION::`, `\\VIDEO::`, ...).
 
+## Hidden slide example {hidden=true}
+
+- This slide is marked as hidden in Slide Show mode.
+- You can also use `{hide=true}`.
+
 ---
 
 ## Text size filter

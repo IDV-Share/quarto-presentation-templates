@@ -21,6 +21,7 @@ CAPTION_PREFIX = "CAPTION::"
 TEXTBLOCK_PREFIX = "TEXTBLOCK::"
 TEXTBLOCK_END_PREFIX = "TEXTBLOCKEND::"
 LAYOUT_PREFIX = "LAYOUT::"
+HIDE_PREFIX = "HIDE::"
 TEXTBLOCK_MARKER_PATTERN = re.compile(
     r"(?<!\\)(" + re.escape(TEXTBLOCK_PREFIX) + r"|" + re.escape(TEXTBLOCK_END_PREFIX) + r")([^\s]+)"
 )
@@ -33,6 +34,7 @@ ESCAPABLE_MARKER_PREFIXES = (
     TEXTBLOCK_PREFIX,
     TEXTBLOCK_END_PREFIX,
     LAYOUT_PREFIX,
+    HIDE_PREFIX,
 )
 TEXTBOX_ORIENTATION = 1
 EMU_PER_POINT = 12700.0
@@ -60,6 +62,7 @@ def load_layout(path):
             "captions": [],
             "text_blocks": [],
             "caption_defaults": {},
+            "slide_hidden": [],
             "footer": "",
             "location": "",
         }
@@ -68,6 +71,7 @@ def load_layout(path):
     captions = data.get("captions", [])
     text_blocks = data.get("text_blocks", [])
     slide_layouts = data.get("slide_layouts", [])
+    slide_hidden = data.get("slide_hidden", [])
     caption_defaults = data.get("caption_defaults", {})
     if not isinstance(columns, list):
         columns = []
@@ -79,6 +83,8 @@ def load_layout(path):
         text_blocks = []
     if not isinstance(slide_layouts, list):
         slide_layouts = []
+    if not isinstance(slide_hidden, list):
+        slide_hidden = []
     if not isinstance(caption_defaults, dict):
         caption_defaults = {}
     return {
@@ -87,6 +93,7 @@ def load_layout(path):
         "captions": captions,
         "text_blocks": text_blocks,
         "slide_layouts": slide_layouts,
+        "slide_hidden": slide_hidden,
         "caption_defaults": caption_defaults,
         "footer": data.get("footer", "") or "",
         "location": data.get("location", "") or "",
@@ -512,10 +519,32 @@ def extract_layout_marker(text):
     return value
 
 
+def extract_hide_marker(text):
+    if not text:
+        return None
+    marker_value = extract_marker(text, HIDE_PREFIX)
+    if marker_value:
+        return truthy(marker_value)
+    if re.search(r"(?<!\\)" + re.escape(HIDE_PREFIX) + r"(?=\s|$)", text):
+        return True
+    return None
+
+
 def strip_layout_marker(text):
     if not text or LAYOUT_PREFIX not in text:
         return text
     cleaned = re.sub(r"(?<!\\)" + re.escape(LAYOUT_PREFIX) + r"[^\r\n]*", "", text)
+    cleaned = re.sub(r"^[\s\r\n]+", "", cleaned)
+    cleaned = re.sub(r"[ \t]+\r", "\r", cleaned)
+    cleaned = re.sub(r"\r{2,}", "\r", cleaned)
+    return cleaned.strip(" \r\n\t")
+
+
+def strip_hide_marker(text):
+    if not text or HIDE_PREFIX not in text:
+        return text
+    cleaned = re.sub(r"(?<!\\)" + re.escape(HIDE_PREFIX) + r"[^\s]+", "", text)
+    cleaned = re.sub(r"(?<!\\)" + re.escape(HIDE_PREFIX) + r"(?=\s|$)", "", cleaned)
     cleaned = re.sub(r"^[\s\r\n]+", "", cleaned)
     cleaned = re.sub(r"[ \t]+\r", "\r", cleaned)
     cleaned = re.sub(r"\r{2,}", "\r", cleaned)
@@ -1143,6 +1172,37 @@ def collect_slide_layout_rules(entries):
     return rules
 
 
+def collect_slide_hidden_rules(entries):
+    rules = {}
+    if not isinstance(entries, list):
+        return rules
+
+    for entry in entries:
+        if isinstance(entry, (int, str)):
+            try:
+                slide_index = int(str(entry).strip())
+            except Exception:
+                continue
+            if slide_index > 0:
+                rules[slide_index] = True
+            continue
+
+        if not isinstance(entry, dict):
+            continue
+
+        slide_ref = entry.get("slide", None)
+        try:
+            slide_index = int(str(slide_ref).strip())
+        except Exception:
+            continue
+        if slide_index <= 0:
+            continue
+
+        hidden_raw = entry.get("hidden", entry.get("hide", True))
+        rules[slide_index] = truthy(hidden_raw)
+    return rules
+
+
 def find_slide_layout_marker(slide):
     for shape in iter_shapes(slide):
         alt_text = shape_alt_text(shape)
@@ -1155,6 +1215,20 @@ def find_slide_layout_marker(slide):
         if name:
             return name, shape, "text"
     return "", None, ""
+
+
+def find_slide_hide_marker(slide):
+    for shape in iter_shapes(slide):
+        alt_text = shape_alt_text(shape)
+        hidden = extract_hide_marker(alt_text)
+        if hidden is not None:
+            return hidden, shape, "alt"
+
+        text_value = shape_text(shape)
+        hidden = extract_hide_marker(text_value)
+        if hidden is not None:
+            return hidden, shape, "text"
+    return None, None, ""
 
 
 def clear_slide_layout_marker(shape, source, debug=None):
@@ -1176,6 +1250,27 @@ def clear_slide_layout_marker(shape, source, debug=None):
     except Exception as exc:
         if debug is not None:
             debug(f"failed to clear layout marker: {exc}")
+
+
+def clear_slide_hide_marker(shape, source, debug=None):
+    if shape is None:
+        return
+    try:
+        if source == "alt":
+            current = shape.AlternativeText or ""
+            cleaned = strip_hide_marker(current)
+            shape.AlternativeText = cleaned
+            return
+
+        if source == "text":
+            if not shape.HasTextFrame:
+                return
+            current = shape.TextFrame.TextRange.Text or ""
+            cleaned = strip_hide_marker(current)
+            shape.TextFrame.TextRange.Text = cleaned
+    except Exception as exc:
+        if debug is not None:
+            debug(f"failed to clear hide marker: {exc}")
 
 
 def list_slide_layout_names(slide):
@@ -1245,6 +1340,18 @@ def apply_slide_layout(slide, layout_name, debug=None):
     except Exception as exc:
         if debug is not None:
             debug(f"failed to apply layout '{wanted}' on slide {slide.SlideIndex}: {exc}")
+        return False
+
+
+def apply_slide_hidden(slide, hidden, debug=None):
+    try:
+        slide.SlideShowTransition.Hidden = -1 if hidden else 0
+        if debug is not None:
+            debug(f"set slide {slide.SlideIndex} hidden={bool(hidden)}")
+        return True
+    except Exception as exc:
+        if debug is not None:
+            debug(f"failed to set hidden={bool(hidden)} on slide {slide.SlideIndex}: {exc}")
         return False
 
 
@@ -1352,6 +1459,14 @@ def fallback_shape_text(shape):
     return ""
 
 
+def fallback_set_shape_text(shape, text):
+    try:
+        if shape.has_text_frame:
+            shape.text = text
+    except Exception:
+        pass
+
+
 def fallback_remove_shape(shape):
     try:
         element = shape._element
@@ -1362,6 +1477,22 @@ def fallback_remove_shape(shape):
     except Exception:
         return False
     return False
+
+
+def apply_slide_hidden_fallback(slide, hidden, debug=None):
+    try:
+        if hidden:
+            slide._element.set("show", "0")
+        else:
+            if "show" in slide._element.attrib:
+                del slide._element.attrib["show"]
+        if debug is not None:
+            debug(f"python-pptx set slide hidden={bool(hidden)}")
+        return True
+    except Exception as exc:
+        if debug is not None:
+            debug(f"python-pptx failed to set hidden={bool(hidden)}: {exc}")
+        return False
 
 
 def ensure_soffice_available(debug=None):
@@ -1391,6 +1522,7 @@ def process_with_python_pptx(
     footer_text,
     location_text,
     slide_layout_rules,
+    slide_hidden_rules,
 ):
     del columns_by_id, boxes_by_id, caption_entries, text_blocks_by_id, caption_defaults, footer_text, location_text
 
@@ -1418,20 +1550,49 @@ def process_with_python_pptx(
     missing = []
     skipped_remote = []
     layout_requests = set()
+    hidden_updates = 0
 
     for slide_index, slide in enumerate(presentation.slides, start=1):
         requested_layout = slide_layout_rules.get(slide_index, "")
         marker_layout = ""
+        requested_hidden = slide_hidden_rules.get(slide_index, None)
+        marker_hidden = None
+        marker_hide_shape = None
+        marker_hide_source = ""
         for shape in slide.shapes:
-            alt_marker = extract_layout_marker(fallback_alt_text(shape))
-            text_marker = extract_layout_marker(fallback_shape_text(shape))
+            alt_text = fallback_alt_text(shape)
+            text_value = fallback_shape_text(shape)
+            alt_marker = extract_layout_marker(alt_text)
+            text_marker = extract_layout_marker(text_value)
             found = alt_marker or text_marker
             if found and not marker_layout:
                 marker_layout = found
+            if marker_hidden is None:
+                alt_hidden = extract_hide_marker(alt_text)
+                if alt_hidden is not None:
+                    marker_hidden = alt_hidden
+                    marker_hide_shape = shape
+                    marker_hide_source = "alt"
+                else:
+                    text_hidden = extract_hide_marker(text_value)
+                    if text_hidden is not None:
+                        marker_hidden = text_hidden
+                        marker_hide_shape = shape
+                        marker_hide_source = "text"
         if requested_layout:
             layout_requests.add(requested_layout)
         if marker_layout:
             layout_requests.add(marker_layout)
+        selected_hidden = requested_hidden if requested_hidden is not None else marker_hidden
+        if selected_hidden is not None and apply_slide_hidden_fallback(slide, selected_hidden, debug=debug):
+            hidden_updates += 1
+        if marker_hide_shape is not None:
+            if marker_hide_source == "alt":
+                current = fallback_alt_text(marker_hide_shape)
+                fallback_set_alt_text(marker_hide_shape, strip_hide_marker(current))
+            elif marker_hide_source == "text":
+                current = fallback_shape_text(marker_hide_shape)
+                fallback_set_shape_text(marker_hide_shape, strip_hide_marker(current))
 
         # Iterate on a snapshot because we may delete shapes while processing.
         for shape in list(slide.shapes):
@@ -1525,6 +1686,8 @@ def process_with_python_pptx(
     print(f"Embedded {replaced} video(s).")
     if replaced >= 0:
         print("Layout adjustments (columns/boxes/captions/text blocks/footer) require the Windows msoffice backend.")
+    if hidden_updates:
+        print(f"Updated hidden state on {hidden_updates} slide(s).")
     return 0
 
 
@@ -1583,6 +1746,7 @@ def main():
 
     columns_by_id, boxes_by_id, caption_entries, text_blocks_by_id = collect_layout(layout)
     slide_layout_rules = collect_slide_layout_rules(layout.get("slide_layouts", []))
+    slide_hidden_rules = collect_slide_hidden_rules(layout.get("slide_hidden", []))
     footer_text = layout.get("footer", "")
     location_text = layout.get("location", "")
     caption_defaults = layout.get("caption_defaults", {})
@@ -1604,6 +1768,7 @@ def main():
             footer_text=footer_text,
             location_text=location_text,
             slide_layout_rules=slide_layout_rules,
+            slide_hidden_rules=slide_hidden_rules,
         )
 
     if not sys.platform.startswith("win"):
@@ -1629,6 +1794,7 @@ def main():
     adjusted_boxes = 0
     adjusted_captions = 0
     adjusted_text_blocks = 0
+    adjusted_hidden_slides = 0
     missing = []
     try:
         try:
@@ -1649,6 +1815,14 @@ def main():
                 apply_slide_layout(slide, selected_layout_name, debug=debug)
                 if marker_shape is not None:
                     clear_slide_layout_marker(marker_shape, marker_source, debug=debug)
+
+            rule_hidden = slide_hidden_rules.get(slide.SlideIndex, None)
+            marker_hidden, marker_hide_shape, marker_hide_source = find_slide_hide_marker(slide)
+            selected_hidden = rule_hidden if rule_hidden is not None else marker_hidden
+            if selected_hidden is not None and apply_slide_hidden(slide, selected_hidden, debug=debug):
+                adjusted_hidden_slides += 1
+            if marker_hide_shape is not None:
+                clear_slide_hide_marker(marker_hide_shape, marker_hide_source, debug=debug)
 
             column_items = []
             box_items = []
@@ -2030,6 +2204,21 @@ def main():
                     except Exception:
                         pass
 
+            # Clean up any leftover hide markers from header attributes.
+            for shape in collect_text_shapes(slide):
+                try:
+                    current = shape.TextFrame.TextRange.Text or ""
+                except Exception:
+                    continue
+                if HIDE_PREFIX not in current:
+                    continue
+                cleaned = strip_hide_marker(current)
+                if cleaned != current:
+                    try:
+                        shape.TextFrame.TextRange.Text = cleaned
+                    except Exception:
+                        pass
+
             # Clean up marker pairs used to style full div text blocks.
             for shape in collect_text_shapes(slide):
                 remove_text_block_markers(shape)
@@ -2073,11 +2262,12 @@ def main():
         print("Warning: missing videos for placeholders:", ", ".join(unique_missing))
 
     print(f"Embedded {replaced} video(s).")
-    if adjusted_columns or adjusted_boxes or adjusted_captions or adjusted_text_blocks:
+    if adjusted_columns or adjusted_boxes or adjusted_captions or adjusted_text_blocks or adjusted_hidden_slides:
         print(
             "Adjusted "
             f"{adjusted_columns} column(s), {adjusted_boxes} box(es), "
-            f"{adjusted_captions} caption(s), and {adjusted_text_blocks} text block(s)."
+            f"{adjusted_captions} caption(s), {adjusted_text_blocks} text block(s), "
+            f"and {adjusted_hidden_slides} hidden slide flag(s)."
         )
     return 0
 
